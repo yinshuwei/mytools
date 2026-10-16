@@ -354,20 +354,34 @@ func someNumbers(name string, f func(a, b float64) float64) func([]float64) (flo
 	}
 }
 
-// formatNumber writes a number the way a calculator does: a whole one
-// without a decimal point, any other as short as it can be written.
-func formatNumber(v float64) string {
+// formatNumber writes a number the way a calculator does, and says what the
+// machine really holds when that is not the same thing.
+//
+// A whole number is written out as it is. A fraction takes fifteen
+// significant digits, which is all a float64 can tell: past them the digits
+// are the binary representation's own error rather than the number's, as
+// 1.3*12-12 is 3.6000000000000014 in binary and 3.6 in decimal. The value
+// with every digit is returned beside the written one whenever the two
+// differ, to be shown on hovering: what is hidden is not thrown away.
+func formatNumber(v float64) (written, exact string) {
 	switch {
 	case math.IsNaN(v):
-		return "不是一个数"
+		return "不是一个数", ""
 	case math.IsInf(v, 1):
-		return "∞"
+		return "∞", ""
 	case math.IsInf(v, -1):
-		return "-∞"
+		return "-∞", ""
 	case v == math.Trunc(v) && math.Abs(v) < 1e15:
-		return strconv.FormatFloat(v, 'f', -1, 64)
+		return strconv.FormatFloat(v, 'f', -1, 64), ""
+	case v == math.Trunc(v):
+		// An integer a float64 holds is exact, whatever its size.
+		return strconv.FormatFloat(v, 'g', -1, 64), ""
 	}
-	return strconv.FormatFloat(v, 'g', -1, 64)
+	written = strconv.FormatFloat(v, 'g', 15, 64)
+	if every := strconv.FormatFloat(v, 'g', -1, 64); every != written {
+		return written, every
+	}
+	return written, ""
 }
 
 // calcBases writes a whole number in hex and binary as well, which is half

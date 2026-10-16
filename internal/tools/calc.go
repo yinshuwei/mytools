@@ -18,7 +18,11 @@ type Calc struct {
 	of    string  // what the value is of: that expression, trimmed
 	value string  // the value, written out
 	num   float64 // the same, as a number
-	err   string  // why the expression does not work out
+	// exact is the value with every digit the machine holds, when that
+	// says more than the fifteen the calculator writes: 1.3*12-12 is 3.6
+	// written and 3.6000000000000014 held.
+	exact string
+	err   string // why the expression does not work out
 
 	hist  []calcEntry // what was worked out, the newest first
 	next  int         // the id the next entry takes
@@ -65,10 +69,11 @@ func (cl *Calc) sync() {
 	}
 	v, err := calcEval(expr)
 	if err != nil {
-		cl.value, cl.of, cl.num, cl.err = "", "", 0, err.Error()
+		cl.value, cl.exact, cl.of, cl.num, cl.err = "", "", "", 0, err.Error()
 		return
 	}
-	cl.num, cl.value, cl.of = v, formatNumber(v), expr
+	cl.num, cl.of = v, expr
+	cl.value, cl.exact = formatNumber(v)
 }
 
 // commit puts what is in the box into the history and clears the box for the
@@ -98,8 +103,8 @@ func (cl *Calc) edit(i int) {
 
 // clear empties the box, the result and the reason there is none.
 func (cl *Calc) clear() {
-	cl.expr, cl.src, cl.of, cl.value, cl.num, cl.err = "", "", "", "", 0, ""
-	cl.focus = true
+	cl.expr, cl.src, cl.of, cl.value, cl.exact, cl.err = "", "", "", "", "", ""
+	cl.num, cl.focus = 0, true
 }
 
 // note is the line under the result: what it is in hex and binary, and,
@@ -164,7 +169,12 @@ func (cl *Calc) View(c *ui.Context) {
 				case cl.err != "":
 					ui.Text(c, "错误："+cl.err).FontSize(12).TextColor(t.Danger)
 				case cl.value != "":
-					ui.Text(c, cl.value).FontSize(26).Bold().Selectable()
+					// What is written is a calculator's digits; what the
+					// machine holds is on hovering, where it is wanted.
+					result := ui.Text(c, cl.value).FontSize(26).Bold().Selectable()
+					if cl.exact != "" {
+						result.Tooltip("浮点数里其实是 " + cl.exact + "，这里按 15 位有效数字显示")
+					}
 					if note := cl.note(); note != "" {
 						widgets.Hint(c, note)
 					}

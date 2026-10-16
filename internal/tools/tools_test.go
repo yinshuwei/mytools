@@ -651,6 +651,56 @@ func TestCalcBases(t *testing.T) {
 	}
 }
 
+// TestCalcNumber checks the digits a value is written with: a calculator's,
+// not the binary representation's own error. The second return is what the
+// machine really holds, given whenever the two differ.
+func TestCalcNumber(t *testing.T) {
+	for _, tc := range []struct {
+		v        float64
+		written  string
+		everyGut string
+	}{
+		{3.6000000000000014, "3.6", "3.6000000000000014"},
+		{0.30000000000000004, "0.3", "0.30000000000000004"},
+		{1.0 / 3, "0.333333333333333", "0.3333333333333333"},
+		{math.Sqrt2, "1.4142135623731", "1.4142135623730951"},
+		{2, "2", ""},
+		{-2.5, "-2.5", ""},
+		{0.5, "0.5", ""},
+		{1e16, "1e+16", ""},
+		{math.Inf(1), "∞", ""},
+	} {
+		written, every := formatNumber(tc.v)
+		if written != tc.written || every != tc.everyGut {
+			t.Errorf("formatNumber(%v) = %q, %q, want %q, %q",
+				tc.v, written, every, tc.written, tc.everyGut)
+		}
+	}
+}
+
+// TestCalcPrecision checks the whole way through: what 1.3*12-12 shows is
+// 3.6, and the value the machine holds is still there to be looked at.
+func TestCalcPrecision(t *testing.T) {
+	cl := &Calc{}
+	tr := ui.NewTester(func(c *ui.Context) { cl.View(c) }, 900, 700)
+	tr.Type("1.3*12-12")
+	if cl.value != "3.6" {
+		t.Errorf("1.3*12-12 显示 %q, want 3.6", cl.value)
+	}
+	if cl.exact != "3.6000000000000014" {
+		t.Errorf("留下的精确值 = %q", cl.exact)
+	}
+	if cl.num != 3.6000000000000014 {
+		t.Errorf("算出来的还是那个 float64，得到 %v", cl.num)
+	}
+	// A value with nothing hidden says nothing about hiding.
+	tr.Click("清空")
+	tr.Type("1/4")
+	if cl.value != "0.25" || cl.exact != "" {
+		t.Errorf("1/4 = %q（exact=%q），want 0.25", cl.value, cl.exact)
+	}
+}
+
 // TestCalcPage checks the page: what is typed is worked out as it is typed,
 // Enter puts it in the history, and Esc clears the box without losing what
 // was worked out.

@@ -20,7 +20,7 @@ import (
 var version = "0.1.0"
 
 func main() {
-	mygo.App.SetName("DevTools")
+	mygo.App.SetName("MyTools")
 	mygo.App.SetVersion(version)
 	mygo.App.WhenReady(func() {
 		// No menu: on Linux and Windows the bar would take a line off the
