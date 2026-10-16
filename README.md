@@ -17,6 +17,33 @@ go run ./cmd/mytools
 - `MYGO_GPU=0`：让 mygo 完全不用 OpenGL 画窗口（GL 驱动老旧、虚拟机、远程显示上窗口发花或崩溃时用）；
 - `MYTOOLS_NO_WEBVIEW=1`：帮助页不碰 web view，直接显示原文。
 
+## 构建
+
+`scripts/` 下是一组编译脚本，把窗口编成各平台的独立可执行文件。MyGo 用 purego 调系统接口、不碰 cgo，所以一台机器就能给全部平台交叉编译：
+
+```sh
+scripts/build.sh                 # 全部目标，产物落在 dist/
+scripts/build.sh --host          # 只编本机
+scripts/build.sh -p linux/amd64  # 只编一个目标
+scripts/build.sh -v 1.2.3        # 指定版本号（默认取 git 标签）
+```
+
+| 目标 | 可执行文件 |
+| --- | --- |
+| `linux/amd64`、`linux/arm64` | `dist/linux-*/mytools` |
+| `darwin/amd64`、`darwin/arm64` | `dist/darwin-*/mytools` |
+| `windows/amd64`、`windows/arm64` | `dist/windows-*/mytools.exe` |
+
+每个目标各占一个 `dist/<os>-<arch>/`：可执行文件，以及运行时放在它旁边的 `resources/`；再打成 `dist/mytools-<版本>-<os>-<arch>.tar.gz`。默认是发布构建——`-trimpath`、`-ldflags "-s -w"`、`-tags mygo_noinspector`（去掉 MyGo 的界面检查器），Windows 目标另加 `-H=windowsgui`，免得弹出控制台；加 `-d` 就反过来，留着调试功能与符号。
+
+Windows 上是同一套参数，用 `scripts\build.cmd`（或直接 `scripts/build.ps1`），开关名对应为 `-Platform`、`-Version`、`-Local`、`-Debug`、`-NoArchive`。
+
+要从系统里装——macOS 的 `.app` 与 `.dmg`、Windows 的安装包、Linux 的 `.deb` 与 `install.sh`——用 MyGo 自带的 CLI 打包：
+
+```sh
+go tool mygo build -platform darwin/universal,windows/amd64,linux/amd64
+```
+
 ## 截图
 
 **JSON 美化**：树形高亮、可折叠；`Cmd/Ctrl+F` 查找，点名字、点值、点空白各复制各的
@@ -80,6 +107,7 @@ internal/app/         窗口外壳：侧边栏导航、页面注册与切换
 internal/tools/       每个工具一个文件（求值器、文件对话框等旁支各另占一个），
                       各自持有状态并实现 tools.Tool
 internal/widgets/     各工具共用的小组件（标题、结果框、复制按钮等）
+scripts/              跨平台编译脚本（build.sh / build.ps1 / build.cmd）
 ```
 
 ## 扩展
