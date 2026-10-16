@@ -51,3 +51,7 @@ go test ./...
 - `internal/app`：用 `ui.NewTester` 在没有窗口的情况下渲染每个页面，
   布局或 Key 出错会直接失败；也验证侧边栏点击切换。
 - `internal/tools`：JSON、编解码往返、时间解析、密码字符集、二维码生成等纯逻辑单测。
+
+## 许可
+
+[MIT](LICENSE)
