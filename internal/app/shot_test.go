@@ -10,10 +10,17 @@ import (
 
 func TestShotApp(t *testing.T) {
 	a := New()
-	a.selected = "json"
+	a.selected = "clock"
 	tr := ui.NewTester(a.View, 980, 700)
-	tr.ClickAt(330, 260)
-	tr.Type(`{"user":{"name":"Ada","tags":["dev","math"]},"age":36,"ok":true,"none":null,"list":[{"a":1},{"b":[2,3]}]}`)
+	if err := tr.Click("本地"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Click("Asia/Tokyo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Click("填入当前"); err != nil {
+		t.Fatal(err)
+	}
 	f, err := os.Create("/tmp/app.png")
 	if err != nil {
 		t.Fatal(err)

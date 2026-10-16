@@ -20,8 +20,12 @@ type JSON struct {
 	indent string
 	mode   int // 0 the tree, 1 the text
 
+	query         string // what the tree is looked through
+	caseSensitive bool
+	filtered      string // the query and case the tree was built for
+
 	root   *jnode
-	flat   []row           // the lines shown: those whose ancestors are open
+	flat   []row           // the lines shown
 	closed map[string]bool // the paths of the containers that are folded
 	list   ui.ListState
 	src    string // the input parsed last
@@ -29,14 +33,15 @@ type JSON struct {
 	out    string // the whole document as text, made when it is asked for
 	outKey string // what out is of: the input and the indent
 
-	nodes int
-	depth int
-	err   string
+	nodes   int
+	matches int
+	depth   int
+	err     string
 }
 
 func (*JSON) ID() string   { return "json" }
 func (*JSON) Name() string { return "JSON 美化" }
-func (*JSON) Desc() string { return "格式化、高亮、折叠，按块复制" }
+func (*JSON) Desc() string { return "格式化、高亮、折叠、查找，按块复制" }
 
 // FillsHeight takes the whole content area: the input and the tree scroll
 // apart.
@@ -56,6 +61,7 @@ type jnode struct {
 	depth int
 	index int  // the item's place in its array, for an array's
 	item  bool // whether the node is an element of an array
+	hit   bool // it or something under it is what is being looked for
 }
 
 func (n *jnode) container() bool { return n.kind == '{' || n.kind == '[' }
@@ -71,8 +77,11 @@ func (n *jnode) closeBrace() string {
 // row is one line of the tree: a value, or the brace closing a container
 // whose values show.
 type row struct {
-	node  *jnode
-	close bool
+	node   *jnode
+	close  bool
+	match  bool // the line matched what is being looked for
+	arrow  bool // the line folds a container
+	folded bool // the container shows as {…}
 }
 
 // key is the line's identity, which the list follows as lines move.
@@ -250,6 +259,45 @@ func (n *jnode) writeCompact(b *strings.Builder) {
 	}
 }
 
+// match reports whether s holds what the pattern looks for: each part of
+// the pattern between *s must show, in order, anywhere in s. So "aa" is
+// anywhere in s, and "aa*bb" is aa, then bb somewhere after it. With
+// caseSensitive clear, letters are compared without their case.
+func match(pattern, s string, caseSensitive bool) bool {
+	if !caseSensitive {
+		pattern, s = strings.ToLower(pattern), strings.ToLower(s)
+	}
+	at := 0
+	for _, part := range strings.Split(pattern, "*") {
+		if part == "" {
+			continue
+		}
+		i := strings.Index(s[at:], part)
+		if i < 0 {
+			return false
+		}
+		at += i + len(part)
+	}
+	return true
+}
+
+// haystack is what a query is looked through for a node: the name it is
+// under, and a value's text, a string's without its quotes.
+func haystack(n *jnode) string {
+	name := ""
+	if !n.item {
+		name = n.key
+	}
+	switch n.kind {
+	case 's':
+		return name + "\x00" + n.raw
+	case '{', '[':
+		return name
+	default:
+		return name + "\x00" + n.text
+	}
+}
+
 // walkAll calls fn for every node of the tree, folded ones included.
 func walkAll(n *jnode, fn func(*jnode)) {
 	fn(n)
@@ -270,55 +318,107 @@ func (j *JSON) indentString() string {
 	}
 }
 
-// sync parses the input again when it changed.
+// sync parses the input again when it changed, and the lines again when
+// what is being looked for did.
 func (j *JSON) sync() {
-	if j.input == j.src {
-		return
+	parsed := false
+	if j.input != j.src {
+		j.src, parsed = j.input, true
+		src := strings.TrimSpace(j.input)
+		if src == "" {
+			j.root, j.flat, j.err, j.nodes, j.depth = nil, nil, "", 0, 0
+		} else if root, err := parseJSON(src); err != nil {
+			j.root, j.flat = nil, nil
+			j.err = err.Error()
+		} else {
+			j.root, j.err, j.outKey = root, "", ""
+			j.nodes, j.depth = 0, 0
+			walkAll(root, func(n *jnode) {
+				j.nodes++
+				j.depth = max(j.depth, n.depth)
+			})
+		}
 	}
-	j.src = j.input
-	src := strings.TrimSpace(j.input)
-	if src == "" {
-		j.root, j.flat, j.err, j.nodes, j.depth = nil, nil, "", 0, 0
-		return
+	if key := j.filterKey(); parsed || key != j.filtered {
+		j.filtered = key
+		j.rebuild()
 	}
-	root, err := parseJSON(src)
-	if err != nil {
-		j.root, j.flat = nil, nil
-		j.err = err.Error()
-		return
-	}
-	j.root, j.err, j.outKey = root, "", ""
-	j.nodes, j.depth = 0, 0
-	walkAll(root, func(n *jnode) {
-		j.nodes++
-		j.depth = max(j.depth, n.depth)
-	})
-	j.rebuild()
 }
 
-// rebuild flattens the tree into the lines that show: the nodes whose
-// ancestors are all open, each open container followed by its closing
-// brace. It makes a new slice, so that a frame building the old lines
+// rebuild flattens the tree into the lines that show. With no query that
+// is the nodes whose ancestors are open, each container that shows its
+// values followed by its closing brace. While looking, it is what matches
+// and the path to it, everything open, and what is inside a container that
+// matched. It makes a new slice, so that a frame building the old lines
 // keeps them as they were.
 func (j *JSON) rebuild() {
 	rows := make([]row, 0, max(len(j.flat), 16))
-	var walk func(n *jnode)
-	walk = func(n *jnode) {
-		rows = append(rows, row{node: n})
-		if !n.container() || j.closed[n.path] {
-			return
+	looking := j.looking()
+	j.matches = 0
+	if looking && j.root != nil {
+		j.markHits(j.root)
+	}
+	var walk func(n *jnode, under bool) bool
+	walk = func(n *jnode, under bool) bool {
+		matched := looking && match(j.query, haystack(n), j.caseSensitive)
+		if looking && !n.hit && !under {
+			return false // nothing here matches, or inside
 		}
-		for _, k := range n.kids {
-			walk(k)
+		at := len(rows)
+		rows = append(rows, row{node: n, match: matched})
+		if matched {
+			j.matches++
 		}
-		if len(n.kids) > 0 {
-			rows = append(rows, row{node: n, close: true})
+		kept := false
+		if n.container() {
+			// Looking shows everything open; the folds come back with
+			// the query gone.
+			if open := looking || !j.closed[n.path]; open {
+				for _, k := range n.kids {
+					if walk(k, under || matched) {
+						kept = true
+					}
+				}
+			}
+			switch {
+			case kept:
+				rows = append(rows, row{node: n, close: true})
+			case looking:
+				rows[at].folded = true // nothing inside matched
+			default:
+				rows[at].folded = j.closed[n.path]
+			}
+			rows[at].arrow = !looking && len(n.kids) > 0
 		}
+		return true
 	}
 	if j.root != nil {
-		walk(j.root)
+		walk(j.root, false)
 	}
 	j.flat = rows
+}
+
+// markHits records, for every node, whether it or anything under it is what
+// is being looked for.
+func (j *JSON) markHits(n *jnode) bool {
+	n.hit = match(j.query, haystack(n), j.caseSensitive)
+	for _, k := range n.kids {
+		if j.markHits(k) {
+			n.hit = true
+		}
+	}
+	return n.hit
+}
+
+// looking reports whether a query is narrowing the tree.
+func (j *JSON) looking() bool { return strings.TrimSpace(j.query) != "" }
+
+// filterKey is what the tree depends on besides the document itself.
+func (j *JSON) filterKey() string {
+	if !j.looking() {
+		return ""
+	}
+	return strconv.FormatBool(j.caseSensitive) + "\x00" + j.query
 }
 
 // folded reports whether the container of n is closed.
@@ -457,7 +557,12 @@ func (j *JSON) View(c *ui.Context) {
 					widgets.Caption(c, "结果")
 					ui.Segmented(c.Key("mode"), &j.mode, "树形", "文本")
 					ui.Spacer(c)
-					if j.mode == 0 {
+					if j.mode != 0 {
+						return
+					}
+					if j.looking() {
+						widgets.Hint(c, fmt.Sprintf("%d 个匹配", j.matches))
+					} else {
 						if ui.Button(c.Key("unfold"), "展开全部").Disabled(j.root == nil).Clicked() {
 							j.unfoldAll()
 						}
@@ -466,18 +571,28 @@ func (j *JSON) View(c *ui.Context) {
 						}
 					}
 				})
-				switch {
-				case j.mode == 1:
-					ui.TextArea(c.Key("out"), &j.out).Label("JSON 结果").ReadOnly(true).FillWidth().Grow(1)
-				case j.root != nil:
-					rows := j.flat
-					j.list.Key = func(i int) any { return rows[i].key() }
-					ui.List(c, &j.list, len(rows), func(i int) { j.row(c, rows, i) }).
-						Label("JSON 树").FillWidth().Grow(1)
-				default:
-					ui.Column(c).Grow(1).Center().Children(func() {
-						widgets.Hint(c, "输入 JSON 后自动解析")
+				if j.mode == 0 {
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.SearchField(c.Key("find"), &j.query).Label("查找").
+							Placeholder("查找，* 匹配任意字符").Grow(1)
+						ui.Checkbox(c.Key("case"), &j.caseSensitive, "Aa").Tooltip("区分大小写")
 					})
+					rows := j.flat
+					if len(rows) == 0 {
+						ui.Column(c).Grow(1).Center().Children(func() {
+							if j.looking() {
+								widgets.Hint(c, "没有匹配的内容")
+							} else {
+								widgets.Hint(c, "输入 JSON 后自动解析")
+							}
+						})
+					} else {
+						j.list.Key = func(i int) any { return rows[i].key() }
+						ui.List(c, &j.list, len(rows), func(i int) { j.row(c, rows, i) }).
+							Label("JSON 树").FillWidth().Grow(1)
+					}
+				} else {
+					ui.TextArea(c.Key("out"), &j.out).Label("JSON 结果").ReadOnly(true).FillWidth().Grow(1)
 				}
 			})
 		})
@@ -490,15 +605,22 @@ func (j *JSON) row(c *ui.Context, rows []row, i int) {
 	if i < 0 || i >= len(rows) {
 		return
 	}
-	n, closing := rows[i].node, rows[i].close
+	r := rows[i]
+	n, closing := r.node, r.close
 	t := c.Theme()
-	line := ui.Row(c).Height(jsonRowHeight).FillWidth().AlignItems(ui.Center).Gap(4).PaddingX(4)
-	if line.Hovered() {
-		line.Background(t.Surface)
+	box := ui.Row(c).Height(jsonRowHeight).FillWidth().AlignItems(ui.Center).Gap(4).PaddingX(4)
+	hovered := box.Hovered()
+	switch {
+	case r.match && hovered:
+		box.Background(t.Accent.Alpha(0.2))
+	case r.match:
+		box.Background(t.Accent.Alpha(0.14))
+	case hovered:
+		box.Background(t.Surface)
 	}
 	if closing {
 		// The brace lines up with the name of its container.
-		line.Children(func() {
+		box.Children(func() {
 			if n.depth > 0 {
 				ui.Box(c).Width(float32(n.depth) * 14).Shrink(0)
 			}
@@ -507,7 +629,7 @@ func (j *JSON) row(c *ui.Context, rows []row, i int) {
 		})
 		return
 	}
-	line.ContextMenu(func(m *ui.Menu) {
+	box.ContextMenu(func(m *ui.Menu) {
 		if m.Item("复制此块").Chosen() {
 			j.copyBlock(c, n)
 		}
@@ -535,13 +657,13 @@ func (j *JSON) row(c *ui.Context, rows []row, i int) {
 			}
 		}
 	})
-	line.Children(func() {
+	box.Children(func() {
 		if n.depth > 0 {
 			ui.Box(c).Width(float32(n.depth) * 14).Shrink(0)
 		}
-		if n.container() {
+		if r.arrow {
 			arrow := "▾"
-			if j.folded(n) {
+			if r.folded {
 				arrow = "▸"
 			}
 			b := ui.ButtonBase(c.Key("fold")).Padding(0, 3).Shrink(0).Tooltip("折叠或展开")
@@ -563,10 +685,15 @@ func (j *JSON) row(c *ui.Context, rows []row, i int) {
 			if n.kind == '[' {
 				open = "["
 			}
-			if j.folded(n) {
+			switch {
+			case len(n.kids) == 0:
+				ui.Text(c, open+n.closeBrace()).TextColor(t.TextMuted).SingleLine().Shrink(0)
+			case r.folded:
 				ui.Text(c, open+"…"+n.closeBrace()).TextColor(t.TextMuted).SingleLine().Shrink(0)
-				widgets.Hint(c, fmt.Sprintf("%d 项", len(n.kids)))
-			} else {
+				if !j.looking() {
+					widgets.Hint(c, fmt.Sprintf("%d 项", len(n.kids)))
+				}
+			default:
 				ui.Text(c, open).TextColor(t.TextMuted).SingleLine().Shrink(0)
 			}
 		default:

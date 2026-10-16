@@ -3,6 +3,7 @@ package tools
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestJSONTree checks the parse, the output and the folding.
@@ -102,6 +103,112 @@ func TestJSONRaw(t *testing.T) {
 	}
 }
 
+// TestMatch checks what looking for a pattern finds.
+func TestMatch(t *testing.T) {
+	for _, tc := range []struct {
+		pattern, s string
+		want       bool
+	}{
+		{"aa", "xxaazz", true},
+		{"aa", "xxzz", false},
+		{"aa*bb", "aa xx bb", true},
+		{"aa*bb", "bb aa", false},
+		{"*aa", "xxaa", true},
+		{"aa*", "aaBB", true},
+		{"", "anything", true},
+		{"a*b*c", "a1b2c", true},
+		{"a*b*c", "a1c2b", false},
+		{"*", "anything", true},
+	} {
+		if got := match(tc.pattern, tc.s, true); got != tc.want {
+			t.Errorf("match(%q, %q) = %v, want %v", tc.pattern, tc.s, got, tc.want)
+		}
+	}
+	if !match("AA", "xxaazz", false) {
+		t.Error("不区分大小写时 AA 应当找到 xxaazz")
+	}
+	if match("AA", "xxaazz", true) {
+		t.Error("区分大小写时 AA 不该找到 xxaazz")
+	}
+}
+
+// names is the names of the rows shown, for telling what a search kept.
+func names(j *JSON) string {
+	var b strings.Builder
+	for _, r := range j.flat {
+		if !r.close {
+			b.WriteString(" " + r.node.key)
+		}
+	}
+	return b.String()
+}
+
+// TestJSONFind checks that looking narrows the tree to what matches and the
+// path to it.
+func TestJSONFind(t *testing.T) {
+	j := &JSON{input: `{"user":{"name":"Ada","city":"Paris"},"count":3,"other":{"name":"Bob"}}`}
+	j.sync()
+	if j.err != "" {
+		t.Fatal(j.err)
+	}
+	all := len(j.flat)
+
+	j.query = "name"
+	j.sync()
+	if j.matches != 2 {
+		t.Errorf("匹配数 = %d, want 2", j.matches)
+	}
+	if len(j.flat) >= all {
+		t.Errorf("查找后行数 = %d，应当比原来的 %d 少", len(j.flat), all)
+	}
+	// The containers on the way to a match show too.
+	if !strings.Contains(names(j), " user") || !strings.Contains(names(j), " other") {
+		t.Errorf("应当显示到匹配的路径，得到 %q", names(j))
+	}
+	// Looking for a container keeps what is inside it.
+	j.query = "user"
+	j.sync()
+	if j.matches != 1 {
+		t.Errorf("匹配数 = %d, want 1", j.matches)
+	}
+	if !strings.Contains(names(j), " name") || !strings.Contains(names(j), " city") {
+		t.Errorf("匹配到的容器里的内容应当都在，得到 %q", names(j))
+	}
+	// A value is found by its text, and what is beside it is not.
+	j.query = "Bob"
+	j.sync()
+	if j.matches != 1 {
+		t.Errorf("按值查找 = %d 个匹配，want 1", j.matches)
+	}
+	if !strings.Contains(names(j), " other") || strings.Contains(names(j), " user") {
+		t.Errorf("只该留下 Bob 那条路径，得到 %q", names(j))
+	}
+	// Nothing found leaves nothing to show.
+	j.query = "nowhere*at*all"
+	j.sync()
+	if len(j.flat) != 0 || j.matches != 0 {
+		t.Errorf("无匹配时不该有行，得到 %d 行 %d 匹配", len(j.flat), j.matches)
+	}
+	// Clearing the query brings the whole document back.
+	j.query = ""
+	j.sync()
+	if len(j.flat) != all {
+		t.Errorf("清空查找后行数 = %d, want %d", len(j.flat), all)
+	}
+	// Folding while looking holds, and shows again once the query is gone.
+	j.query = "Ada"
+	j.sync()
+	j.foldAll()
+	j.query = ""
+	j.sync()
+	if len(j.flat) != 5 {
+		t.Errorf("清空查找后应当回到折叠状态（5 行），得到 %d", len(j.flat))
+	}
+	if !j.flat[1].folded || j.flat[1].node.key != "user" {
+		t.Errorf("user 应当仍然折叠，得到 %+v", j.flat[1])
+	}
+}
+
 // TestQuoteJSON checks the quoting of strings.
 func TestQuoteJSON(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
@@ -154,12 +261,56 @@ func TestClock(t *testing.T) {
 		}
 	}
 	for _, in := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05", "2006-01-02"} {
-		if _, err := parseTime(in); err != nil {
+		if _, err := parseTime(in, time.Local); err != nil {
 			t.Errorf("parseTime(%q) = %v", in, err)
 		}
 	}
-	if _, err := parseTime("不是时间"); err == nil {
+	if _, err := parseTime("不是时间", time.Local); err == nil {
 		t.Error("parseTime 应当报错")
+	}
+}
+
+// TestClockZone checks that one instant reads differently in another zone,
+// and that a time typed in that zone is the same instant.
+func TestClockZone(t *testing.T) {
+	cl := &Clock{unit: "秒", tz: "UTC", ts: "1000000000"}
+	instant, err := cl.fromTimestamp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	loc, err := cl.location()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := instant.In(loc).Format("2006-01-02 15:04:05"); got != "2001-09-09 01:46:40" {
+		t.Errorf("UTC 下 = %q, want 2001-09-09 01:46:40", got)
+	}
+	cl.tz = "Asia/Shanghai"
+	if loc, err = cl.location(); err != nil {
+		t.Fatal(err)
+	}
+	if got := instant.In(loc).Format("2006-01-02 15:04:05"); got != "2001-09-09 09:46:40" {
+		t.Errorf("上海下 = %q, want 2001-09-09 09:46:40", got)
+	}
+	// Reading a time in a zone back gives the same instant.
+	tt, err := parseTime("2001-09-09 09:46:40", loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tt.Unix() != 1000000000 {
+		t.Errorf("解析得到 %d, want 1000000000", tt.Unix())
+	}
+	// A zone typed in that is not known is told of, and the system's own
+	// zone is what everything falls back to.
+	cl = &Clock{tz: customZone, custom: "Not/AZone"}
+	if loc, err := cl.location(); err == nil || loc != time.Local {
+		t.Errorf("未知时区应当报错并退回本地，得到 %v %v", loc, err)
+	}
+	for _, cl := range []*Clock{{}, {tz: localZone}, {tz: customZone}} {
+		loc, err := cl.location()
+		if err != nil || loc != time.Local {
+			t.Errorf("默认应当是本地时区，得到 %v %v", loc, err)
+		}
 	}
 }
 
