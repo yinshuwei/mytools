@@ -6,6 +6,7 @@ require (
 	github.com/boombuler/barcode v1.1.0
 	github.com/egoist/mygo v0.5.5
 	github.com/makiuchi-d/gozxing v0.1.1
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/image v0.46.0
 )
 

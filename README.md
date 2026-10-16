@@ -8,9 +8,9 @@
 go run ./cmd/mytools
 ```
 
-依赖 `github.com/egoist/mygo v0.5.5`；二维码用 `github.com/boombuler/barcode` 生成。
+依赖 `github.com/egoist/mygo v0.5.5`；二维码用 `github.com/boombuler/barcode` 生成，帮助页的 markdown 用 `github.com/yuin/goldmark` 渲染。
 
-窗口左下角的「设置」（或 `Cmd/Ctrl+,`）里有**帮助**（直接显示本文件的原文，它被编进了二进制）和**关于**（版本、许可、源码地址，以及这个二进制实际链接的依赖版本）。
+窗口左下角的「设置」（或 `Cmd/Ctrl+,`）里有**帮助**（把本文件渲染成 HTML，放进 web view 显示，配色跟着窗口主题走；这台机器上取不到 web view 时退回原文文本）和**关于**（版本、许可、源码地址，以及这个二进制实际链接的依赖版本）。
 
 ## 功能
 

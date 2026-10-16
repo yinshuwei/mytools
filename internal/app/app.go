@@ -3,6 +3,7 @@
 package app
 
 import (
+	"errors"
 	"runtime/debug"
 
 	"github.com/egoist/mygo"
@@ -18,9 +19,17 @@ type App struct {
 	tools    []tools.Tool
 	selected string // the ID of the tool shown
 
+	win      *mygo.Window
 	settings bool   // the settings panel is up
 	panel    int    // 0 帮助, 1 关于
-	help     string // what Help shows: the readme, carried in the binary
+	help     string // the readme, carried in the binary
+
+	// helpWeb is the page the help panel shows the readme in, made the
+	// first time it is asked for rather than at startup: a web view is a
+	// whole engine, and most of a session never opens the settings.
+	helpWeb *mygo.WebView
+	helpKey string // the colors it was last loaded with
+	helpErr string // why the readme is shown as text instead
 }
 
 // New makes the toolbox with every tool.
@@ -30,8 +39,10 @@ func New() *App {
 	return a
 }
 
-// SetWindow gives the window to the tools that act on it.
+// SetWindow gives the window to the app itself and to the tools that act on
+// it.
 func (a *App) SetWindow(win *mygo.Window) {
+	a.win = win
 	for _, t := range a.tools {
 		if w, ok := t.(tools.WindowAware); ok {
 			w.SetWindow(win)
@@ -115,10 +126,7 @@ func (a *App) settingsView(c *ui.Context, t *ui.Theme) {
 			})
 			ui.Divider(c)
 			if a.panel == 0 {
-				// The readme as it is on disk, in a character of one
-				// width, so that its tables keep their shape.
-				ui.TextArea(c.Key("help"), &a.help).Label("帮助").
-					ReadOnly(true).Font("monospace").FontSize(12).FillWidth().Grow(1)
+				a.helpView(c, t)
 			} else {
 				ui.Scroll(c).Grow(1).FillWidth().Children(func() { a.about(c, t) })
 			}
@@ -129,6 +137,46 @@ func (a *App) settingsView(c *ui.Context, t *ui.Theme) {
 			})
 		})
 	})
+}
+
+// helpView shows the readme: rendered from markdown into a web view, or, on
+// a machine where no web view can be had, as the text it is.
+func (a *App) helpView(c *ui.Context, t *ui.Theme) {
+	view, err := a.helpPageView(t)
+	if view == nil {
+		if a.helpErr == "" {
+			a.helpErr = err.Error()
+		}
+		widgets.Hint(c, "这里没有可用的 web view（"+a.helpErr+"），下面是原文：")
+		// Read-only, and in a character of one width, so that the
+		// tables of the readme keep their shape.
+		ui.TextArea(c.Key("help"), &a.help).Label("帮助").
+			ReadOnly(true).Font("monospace").FontSize(12).FillWidth().Grow(1)
+		return
+	}
+	ui.WebView(c, view).Label("帮助").Grow(1).Radius(8).Border(1, t.Border)
+}
+
+// helpPageView makes the page of the readme, once, and loads it again when
+// the window's colors change under it.
+func (a *App) helpPageView(t *ui.Theme) (*mygo.WebView, error) {
+	if a.helpWeb == nil || a.helpWeb.IsDestroyed() {
+		if a.win == nil {
+			return nil, errors.New("窗口还没有建好")
+		}
+		view, err := a.win.NewWebView(mygo.WebViewOptions{
+			BackgroundColor: cssColor(t.Background),
+		})
+		if err != nil {
+			return nil, err
+		}
+		a.helpWeb, a.helpKey = view, ""
+	}
+	if style := helpStyle(t); style != a.helpKey {
+		a.helpKey = style
+		a.helpWeb.Page().LoadHTML(helpDocument(style), "")
+	}
+	return a.helpWeb, nil
 }
 
 // about says what the toolbox is, what it was built with, and how it is
