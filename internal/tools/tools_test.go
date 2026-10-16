@@ -332,6 +332,86 @@ func TestJSONFindKeys(t *testing.T) {
 	}
 }
 
+// tallBitmap is a picture far taller than any preview should be.
+func tallBitmap() *ui.Bitmap {
+	img := image.NewRGBA(image.Rect(0, 0, 300, 1200))
+	for i := range img.Pix {
+		img.Pix[i] = 0xff
+	}
+	return ui.NewBitmap(img)
+}
+
+// TestImagePreviewHeight checks that a tall picture is previewed short
+// enough that the page under it still shows in one window, both ways round.
+func TestImagePreviewHeight(t *testing.T) {
+	const w, h = 900, 800
+	encode := &Image{bitmap: tallBitmap(), path: "/pics/tall.png", size: 4096}
+	tr := ui.NewTester(func(c *ui.Context) { encode.View(c) }, w, h)
+	preview, ok := tr.Find("图片预览")
+	if !ok {
+		t.Fatal("找不到预览")
+	}
+	if preview.H > previewHeight {
+		t.Errorf("预览高 %.0f, want ≤ %d", preview.H, previewHeight)
+	}
+	// What comes under the preview is still in the window: otherwise the
+	// page scrolls, which is what the cap is for.
+	if last, ok := tr.Find("Base64 结果"); !ok {
+		t.Fatal("找不到结果框")
+	} else if bottom := last.Y + last.H + 40; bottom > h {
+		t.Errorf("页面高到 %.0f，窗口只有 %d，会出滚动条", bottom, h)
+	}
+
+	decode := &Image{dir: 1, text: "data:image/png;base64,AAAA"}
+	decode.sync()
+	decode.pic = tallBitmap()
+	tr = ui.NewTester(func(c *ui.Context) { decode.View(c) }, w, h)
+	pic, ok := tr.Find("读出的图片")
+	if !ok {
+		t.Fatal("找不到读出的图片")
+	}
+	if pic.H > previewHeight {
+		t.Errorf("读出的图片高 %.0f, want ≤ %d", pic.H, previewHeight)
+	}
+	if last, ok := tr.Find("复制图片"); !ok {
+		t.Fatal("找不到复制图片")
+	} else if bottom := last.Y + last.H + 40; bottom > h {
+		t.Errorf("页面高到 %.0f，窗口只有 %d，会出滚动条", bottom, h)
+	}
+}
+
+// TestJSONFindIsRightAligned checks that the search and what belongs to it
+// end at the right edge of the pane, with the folds left behind on the other
+// side of the line.
+func TestJSONFindIsRightAligned(t *testing.T) {
+	j := &JSON{input: `{"a":1}`}
+	tr := ui.NewTester(func(c *ui.Context) { j.View(c) }, 1200, 700)
+	find, ok := tr.Find("查找")
+	if !ok {
+		t.Fatal("找不到查找框")
+	}
+	// The case switch is the last of the search's parts.
+	last, ok := tr.Find("Aa")
+	if !ok {
+		t.Fatal("找不到区分大小写")
+	}
+	tree, ok := tr.Find("JSON 树")
+	if !ok {
+		t.Fatal("找不到结果树")
+	}
+	if edge, gap := tree.X+tree.W, tree.X+tree.W-(last.X+last.W); gap > 2 {
+		t.Errorf("查找那一组到 pane 右边缘还有 %.0f，没有右对齐（边缘 %.0f，右端 %.0f）",
+			gap, edge, last.X+last.W)
+	}
+	fold, ok := tr.Find("折叠")
+	if !ok {
+		t.Fatal("找不到折叠按钮")
+	}
+	if fold.X+fold.W >= find.X {
+		t.Errorf("折叠按钮（右端 %.0f）应当在查找框（左端 %.0f）左边", fold.X+fold.W, find.X)
+	}
+}
+
 // TestJSONInputKeepsEditing checks that the input keeps its place when the
 // text goes invalid: the line reporting the error comes and goes, which
 // must not remake the input, putting the caret back at its end and dropping
@@ -629,13 +709,93 @@ func TestImage(t *testing.T) {
 	if got := im.saveName(); got != "photo.png.base64.txt" {
 		t.Errorf("默认文件名 = %q, want photo.png.base64.txt", got)
 	}
-	im.mode = 1
+	im.form = 1
 	if got := im.saveName(); got != "photo.png.datauri.txt" {
 		t.Errorf("Data URI 的默认文件名 = %q", got)
 	}
 	im.clear()
 	if im.raw != "" || im.uri != "" || im.bitmap != nil || im.short != [2]string{} {
 		t.Error("清空后不该还留着内容")
+	}
+}
+
+// wrappedBase64 is s with a line break every 76 characters, as Base64 is
+// wrapped in a file or a mail.
+func wrappedBase64(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i += 76 {
+		b.WriteString(s[i:min(i+76, len(s))])
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// TestImageDecode checks that a picture is read back out of the Base64 that
+// holds it in each of the shapes one turns up in, and copied as a picture.
+func TestImageDecode(t *testing.T) {
+	file := noisyPNG(t)
+	b64 := base64.StdEncoding.EncodeToString(file)
+	for _, tc := range []struct{ name, text string }{
+		{"纯 Base64", b64},
+		{"折了行的 Base64", wrappedBase64(b64)},
+		{"补全的 data URI", "data:image/png;base64," + b64},
+		{"当成 JSON 字符串复制的", `"data:image/png;base64,` + b64 + `"`},
+		{"没有填充的 Base64", base64.RawStdEncoding.EncodeToString(file)},
+	} {
+		im := &Image{dir: 1, text: tc.text}
+		im.sync()
+		if im.picErr != "" {
+			t.Errorf("%s：%s", tc.name, im.picErr)
+			continue
+		}
+		if im.pic == nil {
+			t.Errorf("%s：没有读出图片", tc.name)
+			continue
+		}
+		if !bytes.Equal(im.picData, file) {
+			t.Errorf("%s：读出来的字节与原来那张图不同", tc.name)
+		}
+		if !strings.HasPrefix(im.picInfo, "PNG · 96×96 · ") {
+			t.Errorf("%s：图片信息 = %q", tc.name, im.picInfo)
+		}
+		if len(im.shownText) >= len(tc.text) {
+			t.Errorf("%s：显示的文本没有被截断（%d 个字符）", tc.name, len(im.shownText))
+		}
+	}
+
+	// What is not Base64, and what is not a picture, are both told of.
+	im := &Image{text: "这不是 Base64!!!"}
+	im.sync()
+	if im.picErr == "" || im.picData != nil {
+		t.Errorf("不是 Base64 时应当报错，得到 %q", im.picErr)
+	}
+	im = &Image{text: base64.StdEncoding.EncodeToString([]byte("hello"))}
+	im.sync()
+	if im.picErr == "" || im.picData != nil {
+		t.Errorf("不是图片时应当报错，得到 %q", im.picErr)
+	}
+	im.text = ""
+	im.sync()
+	if im.picErr != "" || im.pic != nil || im.shownText != "" {
+		t.Errorf("清空后应当什么都不报，得到 %q", im.picErr)
+	}
+
+	// The picture goes on the clipboard as a PNG of its own size.
+	im = &Image{dir: 1, text: "data:image/png;base64," + b64}
+	tr := ui.NewTester(func(c *ui.Context) { im.View(c) }, 900, 700)
+	if err := tr.Click("复制图片"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tr.ClipboardData().Read(transfer.PNG)
+	if err != nil {
+		t.Fatalf("剪贴板里没有图片：%v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(got))
+	if err != nil {
+		t.Fatalf("复制出来的不是 PNG：%v", err)
+	}
+	if p := img.Bounds().Size(); p.X != 96 || p.Y != 96 {
+		t.Errorf("复制出来的图片是 %v, want 96×96", p)
 	}
 }
 

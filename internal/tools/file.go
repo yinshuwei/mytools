@@ -81,6 +81,12 @@ var textFilters = []mygo.FileFilter{{
 	Extensions: []string{"txt"},
 }}
 
+// base64Filters limits a file dialog to the text a picture is read out of.
+var base64Filters = []mygo.FileFilter{{
+	Name:       "Base64 文本",
+	Extensions: []string{"txt", "b64", "dat"},
+}}
+
 // humanBytes formats a size for the eye.
 func humanBytes(n int) string {
 	switch {
