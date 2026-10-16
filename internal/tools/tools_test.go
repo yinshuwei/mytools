@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math"
 	"math/rand"
 	"strings"
 	"testing"
@@ -573,6 +574,144 @@ func TestPasswordShortcut(t *testing.T) {
 	}
 	if len(p.pws) != 3 {
 		t.Errorf("批 = %d 条, want 3", len(p.pws))
+	}
+}
+
+// TestCalcEval checks what an expression works out to, and what is refused.
+func TestCalcEval(t *testing.T) {
+	for _, tc := range []struct {
+		expr string
+		want float64
+	}{
+		{"1+2*3", 7},
+		{"(1+2)*3", 9},
+		{"10-2-3", 5},
+		{"100/4/5", 5},
+		{"10 % 3", 1},
+		{"2^10", 1024},
+		{"2^3^2", 512},
+		{"2^-1", 0.5},
+		{"-2^2", -4},
+		{"+3", 3},
+		{"1.5*2", 3},
+		{".5+.25", 0.75},
+		{"1e3", 1000},
+		{"1_000_000", 1e6},
+		{"0xff", 255},
+		{"0b1010", 10},
+		{"0o17", 15},
+		{"0x_ff_ff", 65535},
+		{"abs(-3)", 3},
+		{"min(3,1,2)", 1},
+		{"max(1,2,3)", 3},
+		{"hypot(3,4)", 5},
+		{"sqrt(16)", 4},
+		{"log(100)", 2},
+		{"ln(e)", 1},
+		{"round(2.5)", 3},
+		{"floor(-1.5)", -2},
+		{"pi", math.Pi},
+		{"2*tau", 4 * math.Pi},
+	} {
+		got, err := calcEval(tc.expr)
+		if err != nil {
+			t.Errorf("%s：%v", tc.expr, err)
+			continue
+		}
+		if math.Abs(got-tc.want) > 1e-9*math.Max(1, math.Abs(tc.want)) {
+			t.Errorf("%s = %v, want %v", tc.expr, got, tc.want)
+		}
+	}
+	for _, expr := range []string{
+		"", "1+", "(1+2", "1+2)", "1 2", "1/0", "10%0", "0x", "1e", "foo", "foo(1)",
+		"sqrt(1,2)", "min(1)", "1..2", "*3",
+	} {
+		if v, err := calcEval(expr); err == nil {
+			t.Errorf("%q 应当报错，得到 %v", expr, v)
+		}
+	}
+}
+
+// TestCalcBases checks the hex and binary forms given under a result.
+func TestCalcBases(t *testing.T) {
+	for _, tc := range []struct {
+		v    float64
+		want string
+	}{
+		{0, "0x0 · 0b0"},
+		{162, "0xa2 · 0b10100010"},
+		{255, "0xff · 0b11111111"},
+		{-10, "0x-a · 0b-1010"},
+		{1.5, ""},
+		{1e16, ""},
+	} {
+		if got := calcBases(tc.v); got != tc.want {
+			t.Errorf("calcBases(%v) = %q, want %q", tc.v, got, tc.want)
+		}
+	}
+}
+
+// TestCalcPage checks the page: what is typed is worked out as it is typed,
+// Enter puts it in the history, and Esc clears the box without losing what
+// was worked out.
+func TestCalcPage(t *testing.T) {
+	cl := &Calc{}
+	tr := ui.NewTester(func(c *ui.Context) { cl.View(c) }, 900, 700)
+	// The box takes the keyboard as the page opens: typing goes into it.
+	tr.Type("1+2*3")
+	if cl.expr != "1+2*3" || cl.value != "7" {
+		t.Fatalf("输入 %q，结果 %q", cl.expr, cl.value)
+	}
+	if !tr.HasText("0x7") {
+		t.Errorf("结果里没有十六进制：%q", tr.Texts())
+	}
+	// Enter puts it in the history, and clears the box for the next one.
+	tr.Key(0, ui.KeyEnter)
+	if len(cl.hist) != 1 || cl.hist[0].expr != "1+2*3" || cl.hist[0].value != "7" {
+		t.Fatalf("历史 = %+v", cl.hist)
+	}
+	if cl.value != "7" || !tr.HasText("上次 1+2*3") {
+		t.Errorf("记入历史后结果应当还留着：value=%q", cl.value)
+	}
+	tr.Type("4*5")
+	if cl.expr != "4*5" || cl.value != "20" {
+		t.Fatalf("清空后接着打 = %q（结果 %q）", cl.expr, cl.value)
+	}
+	// Cmd+Enter copies the result.
+	tr.Key(ui.Cmd, ui.KeyEnter)
+	if got := tr.Clipboard(); got != "20" {
+		t.Errorf("剪贴板 = %q, want 20", got)
+	}
+	// Esc clears what is typed; what was worked out stays.
+	tr.Key(0, ui.KeyEscape)
+	if cl.expr != "" || cl.value != "20" {
+		t.Errorf("Esc 后输入 = %q，结果 = %q", cl.expr, cl.value)
+	}
+}
+
+// TestCalcHistory checks that a line of the history puts its expression back
+// in the box on a click, and hands over its result on its own button.
+func TestCalcHistory(t *testing.T) {
+	cl := &Calc{hist: []calcEntry{{id: 1, expr: "(1+2)*3", value: "9"}}}
+	tr := ui.NewTester(func(c *ui.Context) { cl.View(c) }, 900, 700)
+	if err := tr.Click("复制"); err != nil {
+		t.Fatal(err)
+	}
+	if got := tr.Clipboard(); got != "9" {
+		t.Errorf("剪贴板 = %q, want 9", got)
+	}
+	if cl.expr != "" {
+		t.Errorf("点复制按钮不该把算式放回输入框，得到 %q", cl.expr)
+	}
+	if err := tr.Click("(1+2)*3"); err != nil {
+		t.Fatal(err)
+	}
+	if cl.expr != "(1+2)*3" {
+		t.Fatalf("点历史后输入 = %q, want (1+2)*3", cl.expr)
+	}
+	// What comes back is worked out again, ready to be changed.
+	if cl.value != "9" {
+		t.Errorf("回填后结果 = %q, want 9", cl.value)
 	}
 }
 

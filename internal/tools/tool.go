@@ -38,5 +38,6 @@ func All() []Tool {
 		&QR{},
 		&Password{},
 		&Image{},
+		&Calc{},
 	}
 }
