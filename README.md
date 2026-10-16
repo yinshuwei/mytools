@@ -17,6 +17,30 @@ go run ./cmd/mytools
 - `MYGO_GPU=0`：让 mygo 完全不用 OpenGL 画窗口（GL 驱动老旧、虚拟机、远程显示上窗口发花或崩溃时用）；
 - `MYTOOLS_NO_WEBVIEW=1`：帮助页不碰 web view，直接显示原文。
 
+## 截图
+
+**JSON 美化**：树形高亮、可折叠；`Cmd/Ctrl+F` 查找，点名字、点值、点空白各复制各的
+
+![JSON 美化](docs/json.png)
+
+**计算器**：边打边算，整数结果顺带给出十六进制与二进制；历史点一下就能放回输入框改
+
+![计算器](docs/calc.png)
+
+**二维码**：生成与解码，图片本身可以直接复制
+
+![二维码](docs/qr.png)
+
+**设置 · 帮助**：README 渲染成 HTML，放进 web view，配色跟着窗口走
+
+![设置 · 帮助](docs/help.png)
+
+**设置 · 关于**：版本、许可、源码，以及这个二进制实际链接的依赖
+
+![设置 · 关于](docs/settings.png)
+
+截图是拿真实页面画出来的，要重画就 `MYTOOLS_SHOTS=1 go test ./internal/app -run TestShots`（写到 `docs/`）。
+
 ## 功能
 
 | 工具 | 说明 |
@@ -50,6 +74,7 @@ go run ./cmd/mytools
 
 ```
 doc.go                根包：把 README 编进二进制，供「帮助」显示
+docs/                 截图：README 里贴的，「帮助」页里也是这些
 cmd/mytools/          可执行入口：应用名、版本、窗口（没有菜单栏）
 internal/app/         窗口外壳：侧边栏导航、页面注册与切换
 internal/tools/       每个工具一个文件（求值器、文件对话框等旁支各另占一个），

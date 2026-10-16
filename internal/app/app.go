@@ -222,7 +222,7 @@ func (a *App) helpPageView(t *ui.Theme) (*mygo.WebView, error) {
 		// Dress it again when the window's colors change under it.
 		if style := helpStyle(t); style != a.helpKey {
 			a.helpKey = style
-			a.helpWeb.Page().LoadHTML(helpDocument(style), "")
+			a.helpWeb.Page().LoadHTML(helpDocument(style), helpBase())
 		}
 		return a.helpWeb, nil
 	}

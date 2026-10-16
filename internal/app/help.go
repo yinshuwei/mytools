@@ -4,6 +4,7 @@ import (
 	"fmt"
 	stdhtml "html"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -17,6 +18,21 @@ import (
 // helpAsText is set by MYTOOLS_NO_WEBVIEW, which asks for the readme as the
 // text it is: for a machine where the web engine cannot draw at all.
 var helpAsText = os.Getenv("MYTOOLS_NO_WEBVIEW") != ""
+
+// helpBase is what the readme's relative links resolve against: the source
+// tree, when the program runs from it, so that the screenshots it shows are
+// there to be shown. A built binary run from anywhere else has none, and
+// the readme shows as text is enough there.
+func helpBase() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	if _, err := os.Stat(filepath.Join(wd, "docs")); err != nil {
+		return ""
+	}
+	return "file://" + wd + "/"
+}
 
 // markdown renders the readme. The extensions are GitHub's, which is what
 // the readme is written in: tables above all, and autolinks.
