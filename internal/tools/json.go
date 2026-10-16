@@ -23,6 +23,7 @@ type JSON struct {
 	query         string // what the tree is looked through
 	caseSensitive bool
 	searched      string // the query and case the matches are of
+	focusFind     bool   // the search is to take the keyboard this frame
 
 	root   *jnode
 	flat   []row           // the lines shown
@@ -574,6 +575,17 @@ func (j *JSON) View(c *ui.Context) {
 		j.indent = "2"
 	}
 	j.sync()
+	// The search takes the keyboard on Cmd+F, as a find bar opens. The
+	// tree is what there is to search, so the text view comes back to it.
+	if c.Shortcut(ui.Cmd, ui.KeyF) {
+		j.mode, j.focusFind = 0, true
+	}
+	// Escape clears what is looked for, as it does in a find bar,
+	// wherever the keyboard is: what is typed is worth keeping, what is
+	// looked for is not.
+	if j.looking() && c.Shortcut(0, ui.KeyEscape) {
+		j.query = ""
+	}
 
 	ui.Column(c).FillWidth().FillHeight().Gap(10).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -629,12 +641,13 @@ func (j *JSON) View(c *ui.Context) {
 					ui.Spacer(c)
 					// A text input of our own, so that the keys moving
 					// between matches are taken as they come: a search
-					// field hides the input the keys go to.
-					// Of a width of its own, not a growing one: what is
-					// left of the line is the spacer's, so that the search
-					// stays at the right edge whatever the pane's width.
-					ui.TextInput(c.Key("find"), &j.query).Label("查找").
+					// field hides the input the keys go to. Of a width of
+					// its own, not a growing one: what is left of the line
+					// is the spacer's, so that the search stays at the
+					// right edge whatever the pane's width.
+					find := ui.TextInput(c.Key("find"), &j.query).Label("查找").
 						Placeholder("查找，* 匹配任意字符").
+						Tooltip("查找，" + widgets.ShortcutHint(0, "F") + " 来到这，Esc 清空").
 						Width(180).
 						OnTextKey(func(k ui.TextKey) bool {
 							switch k.Key {
@@ -656,6 +669,12 @@ func (j *JSON) View(c *ui.Context) {
 							}
 							return true
 						})
+					if j.focusFind {
+						// Only the frame it was asked for: from then on
+						// a click decides where the keyboard is.
+						j.focusFind = false
+						find.Focus()
+					}
 					if j.query != "" {
 						if ui.Button(c.Key("clearfind"), "×").Tooltip("清空查找").Clicked() {
 							j.query = ""

@@ -173,7 +173,9 @@ func (p *Password) View(c *ui.Context) {
 	ui.Checkbox(c.Key("avoid"), &p.avoid, "排除易混淆字符（I l 1 O 0 o 等）")
 
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-		if ui.PrimaryButton(c.Key("gen"), "生成").Clicked() {
+		gen := ui.PrimaryButton(c.Key("gen"), "生成").
+			Tooltip("再换一批（" + widgets.ShortcutHint(0, "Enter") + "）")
+		if mainPressed(c, gen) {
 			p.gen()
 		}
 		widgets.CopyButton(c.Key("copyall"), "复制全部", p.text)

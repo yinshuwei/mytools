@@ -270,7 +270,9 @@ func (q *QR) makeView(c *ui.Context, t *ui.Theme) {
 		ui.Slider(c.Key("size"), &q.size, 120, 1000).Step(10).Width(160)
 		ui.Textf(c, "%.0f px", q.size).FontSize(12).TextColor(t.TextMuted)
 		ui.Spacer(c)
-		if ui.Button(c.Key("logo"), "选择 Logo…").Tooltip("在二维码中间放一张图片").Clicked() {
+		logo := ui.Button(c.Key("logo"), "选择 Logo…").
+			Tooltip("在二维码中间放一张图片（" + widgets.ShortcutHint(0, "O") + "）")
+		if filePressed(c, logo) {
 			pickFile(q.win, c.Services(), "选择 Logo", imageFilters, q.logoPick)
 		}
 		if q.logo != "" {
@@ -300,7 +302,9 @@ func (q *QR) makeView(c *ui.Context, t *ui.Theme) {
 		}
 	})
 	ui.Row(c).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
-		if ui.PrimaryButton(c.Key("copyimg"), "复制图片").Disabled(q.code == nil).Clicked() {
+		copyImg := ui.PrimaryButton(c.Key("copyimg"), "复制图片").Disabled(q.code == nil).
+			Tooltip("把二维码图片放进剪贴板（" + widgets.ShortcutHint(0, "Enter") + "）")
+		if q.code != nil && mainPressed(c, copyImg) {
 			q.copyCode(c)
 		}
 		widgets.Hint(c, "复制的是图片本身，可直接粘贴到微信、文档或聊天窗口")
@@ -310,7 +314,9 @@ func (q *QR) makeView(c *ui.Context, t *ui.Theme) {
 // readView is the page that reads a code back.
 func (q *QR) readView(c *ui.Context, t *ui.Theme) {
 	ui.Row(c).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
-		if ui.PrimaryButton(c.Key("pick"), "选择图片…").Disabled(q.busy).Clicked() {
+		pick := ui.PrimaryButton(c.Key("pick"), "选择图片…").Disabled(q.busy).
+			Tooltip("选一张带二维码的图片（" + widgets.ShortcutHint(0, "O") + "）")
+		if !q.busy && (filePressed(c, pick) || mainPressed(c, pick)) {
 			q.busy = true
 			pickFile(q.win, c.Services(), "选择二维码图片", imageFilters, q.decodePick)
 		}

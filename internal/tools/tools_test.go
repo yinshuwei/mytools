@@ -412,6 +412,45 @@ func TestJSONFindIsRightAligned(t *testing.T) {
 	}
 }
 
+// TestJSONFindShortcuts checks that Cmd+F takes the keyboard to the search
+// from wherever it was, and that Escape clears what is looked for without
+// touching what is written.
+func TestJSONFindShortcuts(t *testing.T) {
+	const src = `{"a":{"name":"one"},"b":{"name":"two"}}`
+	j := &JSON{input: src}
+	tr := ui.NewTester(func(c *ui.Context) { j.View(c) }, 900, 600)
+	if err := tr.Click("JSON 输入"); err != nil {
+		t.Fatal(err)
+	}
+	tr.Key(ui.Cmd, ui.KeyF)
+	if !tr.Focused("查找") {
+		t.Fatal("Cmd+F 没有把键盘给查找框")
+	}
+	tr.Type("name")
+	if j.query != "name" || len(j.found) != 2 {
+		t.Fatalf("查找 %q 找到 %d 个，want name 2 个", j.query, len(j.found))
+	}
+	// From the text view too: the tree is what there is to search.
+	if err := tr.Click("文本"); err != nil {
+		t.Fatal(err)
+	}
+	tr.Key(ui.Cmd, ui.KeyF)
+	if j.mode != 0 || !tr.Focused("查找") {
+		t.Errorf("文本视图里 Cmd+F 后 mode=%d，聚焦查找框 %v", j.mode, tr.Focused("查找"))
+	}
+	// Escape clears what is looked for, wherever the keyboard is.
+	if err := tr.Click("JSON 输入"); err != nil {
+		t.Fatal(err)
+	}
+	tr.Key(0, ui.KeyEscape)
+	if j.query != "" || len(j.found) != 0 {
+		t.Errorf("Esc 之后查找 = %q，匹配 %d 个", j.query, len(j.found))
+	}
+	if j.input != src {
+		t.Errorf("Esc 动了输入：%q", j.input)
+	}
+}
+
 // TestJSONInputKeepsEditing checks that the input keeps its place when the
 // text goes invalid: the line reporting the error comes and goes, which
 // must not remake the input, putting the caret back at its end and dropping
@@ -488,6 +527,52 @@ func TestCodec(t *testing.T) {
 	}
 	if _, err := decodeText("Hex", "zz"); err == nil {
 		t.Error("Hex 解码无效输入应当报错")
+	}
+}
+
+// TestCodecShortcuts checks that the keyboard presses the page's buttons
+// while one is typing in it: Cmd+Enter the main one, encoding, and
+// Cmd+Shift+Enter the other, decoding.
+func TestCodecShortcuts(t *testing.T) {
+	cd := &Codec{mode: "Base64", input: "你好"}
+	tr := ui.NewTester(func(c *ui.Context) { cd.View(c) }, 900, 700)
+	if err := tr.Click("文本输入"); err != nil {
+		t.Fatal(err)
+	}
+	tr.Type("!")
+	if !strings.Contains(cd.input, "!") {
+		t.Fatalf("没有点到输入框，输入 = %q", cd.input)
+	}
+	text := cd.input
+	tr.Key(ui.Cmd, ui.KeyEnter)
+	if want := base64.StdEncoding.EncodeToString([]byte(text)); cd.out != want {
+		t.Fatalf("Cmd+Enter 后 = %q, want %q", cd.out, want)
+	}
+	// The other way round: what was encoded goes back in, and decodes.
+	if err := tr.Click("结果 → 输入"); err != nil {
+		t.Fatal(err)
+	}
+	if cd.input != base64.StdEncoding.EncodeToString([]byte(text)) {
+		t.Fatalf("回填后输入 = %q", cd.input)
+	}
+	tr.Key(ui.Cmd|ui.Shift, ui.KeyEnter)
+	if cd.err != "" || cd.out != text {
+		t.Errorf("Cmd+Shift+Enter 后 = %q (err=%q), want %q", cd.out, cd.err, text)
+	}
+}
+
+// TestPasswordShortcut checks that Cmd+Enter makes another batch.
+func TestPasswordShortcut(t *testing.T) {
+	p := &Password{inited: true, length: 12, count: 3, upper: true, lower: true, digits: true}
+	p.gen()
+	before := p.text
+	tr := ui.NewTester(func(c *ui.Context) { p.View(c) }, 900, 700)
+	tr.Key(ui.Cmd, ui.KeyEnter)
+	if p.text == before {
+		t.Error("Cmd+Enter 没有换一批")
+	}
+	if len(p.pws) != 3 {
+		t.Errorf("批 = %d 条, want 3", len(p.pws))
 	}
 }
 
@@ -626,19 +711,30 @@ func logoImage() image.Image {
 }
 
 // TestQRCopyImage checks that the code can be copied as a picture, ready to
-// paste into a chat.
+// paste into a chat, both by the button and by Cmd+Enter.
 func TestQRCopyImage(t *testing.T) {
-	q := &QR{text: "https://example.com", size: 240}
-	tr := ui.NewTester(func(c *ui.Context) { q.View(c) }, 900, 600)
-	if err := tr.Click("复制图片"); err != nil {
-		t.Fatal(err)
-	}
-	b, err := tr.ClipboardData().Read(transfer.PNG)
-	if err != nil {
-		t.Fatalf("剪贴板里没有图片：%v", err)
-	}
-	if _, err := png.Decode(bytes.NewReader(b)); err != nil {
-		t.Errorf("复制出来的不是 PNG：%v", err)
+	for _, tc := range []struct {
+		name string
+		act  func(t *testing.T, tr *ui.Tester)
+	}{
+		{"按钮", func(t *testing.T, tr *ui.Tester) {
+			if err := tr.Click("复制图片"); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"Cmd+Enter", func(t *testing.T, tr *ui.Tester) { tr.Key(ui.Cmd, ui.KeyEnter) }},
+	} {
+		q := &QR{text: "https://example.com", size: 240}
+		tr := ui.NewTester(func(c *ui.Context) { q.View(c) }, 900, 600)
+		tc.act(t, tr)
+		b, err := tr.ClipboardData().Read(transfer.PNG)
+		if err != nil {
+			t.Errorf("%s：剪贴板里没有图片：%v", tc.name, err)
+			continue
+		}
+		if _, err := png.Decode(bytes.NewReader(b)); err != nil {
+			t.Errorf("%s：复制出来的不是 PNG：%v", tc.name, err)
+		}
 	}
 }
 

@@ -3,10 +3,33 @@ package widgets
 
 import (
 	"fmt"
+	"runtime"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 )
+
+// ShortcutHint writes a shortcut as the platform writes it, for a tooltip:
+// every shortcut of the toolbox holds the platform's command key, so
+// ShortcutHint(0, "F") reads ⌘F on a Mac and Ctrl+F elsewhere, and extra
+// modifiers are written before the key.
+func ShortcutHint(extra ui.Modifiers, key string) string {
+	var b strings.Builder
+	if runtime.GOOS == "darwin" {
+		b.WriteString("⌘")
+		if extra&ui.Shift != 0 {
+			b.WriteString("⇧")
+		}
+	} else {
+		b.WriteString("Ctrl+")
+		if extra&ui.Shift != 0 {
+			b.WriteString("Shift+")
+		}
+	}
+	b.WriteString(key)
+	return b.String()
+}
 
 // Caption is a small bold label above a control.
 func Caption(c *ui.Context, s string) ui.Element {

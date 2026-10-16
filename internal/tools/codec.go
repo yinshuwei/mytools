@@ -91,13 +91,18 @@ func (cd *Codec) View(c *ui.Context) {
 		widgets.Hint(c, "文本按 UTF-8 处理")
 	})
 	widgets.Field(c, "输入", func() {
-		ui.TextArea(c.Key("in"), &cd.input).Label("输入").Placeholder("要编码或解码的文本…").Lines(5, 14).FillWidth()
+		ui.TextArea(c.Key("in"), &cd.input).Label("文本输入").
+			Placeholder("要编码或解码的文本…").Lines(5, 14).FillWidth()
 	})
 	ui.Row(c).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
-		if ui.PrimaryButton(c.Key("enc"), "编码 ↓").Clicked() {
+		enc := ui.PrimaryButton(c.Key("enc"), "编码 ↓").
+			Tooltip("把输入按所选方式编码（" + widgets.ShortcutHint(0, "Enter") + "）")
+		if mainPressed(c, enc) {
 			cd.convert(false)
 		}
-		if ui.Button(c.Key("dec"), "解码 ↓").Clicked() {
+		dec := ui.Button(c.Key("dec"), "解码 ↓").
+			Tooltip("把输入按所选方式解码（" + widgets.ShortcutHint(ui.Shift, "Enter") + "）")
+		if dec.Clicked() || c.Shortcut(ui.Cmd|ui.Shift, ui.KeyEnter) {
 			cd.convert(true)
 		}
 		if ui.Button(c.Key("swap"), "结果 → 输入").Clicked() {

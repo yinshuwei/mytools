@@ -281,7 +281,9 @@ func (im *Image) View(c *ui.Context) {
 // encodeView is the page that turns a picture into text.
 func (im *Image) encodeView(c *ui.Context, t *ui.Theme) {
 	ui.Row(c).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
-		if ui.PrimaryButton(c.Key("pick"), "选择图片…").Disabled(im.busy).Clicked() {
+		pick := ui.PrimaryButton(c.Key("pick"), "选择图片…").Disabled(im.busy).
+			Tooltip("选一张本地图片（" + widgets.ShortcutHint(0, "O") + "）")
+		if !im.busy && (filePressed(c, pick) || mainPressed(c, pick)) {
 			im.busy = true
 			pickFile(im.win, c.Services(), "选择图片", imageFilters, im.picks)
 		}
@@ -315,9 +317,11 @@ func (im *Image) encodeView(c *ui.Context, t *ui.Theme) {
 		ui.Segmented(c.Key("form"), &im.form, "纯 Base64", "Data URI")
 		ui.Spacer(c)
 		widgets.CopyButton(c.Key("copy"), "复制", *shown)
-		if ui.Button(c.Key("save"), "保存为文件…").
-			Tooltip("把完整的内容写进一个文本文件，自己选位置和名字").
-			Disabled(im.raw == "" || im.saving).Clicked() {
+		save := ui.Button(c.Key("save"), "保存为文件…").
+			Tooltip("把完整的内容写进一个文本文件，自己选位置和名字（" +
+				widgets.ShortcutHint(0, "S") + "）").
+			Disabled(im.raw == "" || im.saving)
+		if save.Clicked() || im.raw != "" && !im.saving && c.Shortcut(ui.Cmd, ui.KeyS) {
 			im.saving = true
 			im.saved, im.saveErr = "", ""
 			saveFile(im.win, c.Services(), "保存为文本文件", im.saveName(), *shown, im.saves)
@@ -344,11 +348,14 @@ func (im *Image) decodeView(c *ui.Context, t *ui.Theme) {
 	im.sync()
 
 	ui.Row(c).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
-		if ui.PrimaryButton(c.Key("paste"), "从剪贴板粘贴").Clicked() {
+		paste := ui.PrimaryButton(c.Key("paste"), "从剪贴板粘贴").
+			Tooltip("读剪贴板上的 Base64 或 data URI（" + widgets.ShortcutHint(0, "Enter") + "）")
+		if mainPressed(c, paste) {
 			im.text = c.Services().ReadClipboard()
 		}
-		if ui.Button(c.Key("picktext"), "选择文件…").Disabled(im.busy).
-			Tooltip("读一个装着 Base64 的文本文件").Clicked() {
+		pickText := ui.Button(c.Key("picktext"), "选择文件…").Disabled(im.busy).
+			Tooltip("读一个装着 Base64 的文本文件（" + widgets.ShortcutHint(0, "O") + "）")
+		if !im.busy && filePressed(c, pickText) {
 			im.busy = true
 			pickFile(im.win, c.Services(), "选择 Base64 文本文件", base64Filters, im.texts)
 		}
@@ -383,7 +390,9 @@ func (im *Image) decodeView(c *ui.Context, t *ui.Theme) {
 		})
 	}
 	ui.Row(c).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
-		if ui.PrimaryButton(c.Key("copyimg"), "复制图片").Disabled(im.picData == nil).Clicked() {
+		copyImg := ui.PrimaryButton(c.Key("copyimg"), "复制图片").Disabled(im.picData == nil).
+			Tooltip("把图片本身放进剪贴板（" + widgets.ShortcutHint(0, "Enter") + "）")
+		if im.picData != nil && mainPressed(c, copyImg) {
 			im.copyPic(c)
 		}
 		if im.picInfo != "" {
