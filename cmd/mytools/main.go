@@ -14,8 +14,14 @@ import (
 	"gitee.com/yinshuwei/mytools/internal/app"
 )
 
+// version is what the About panel shows; a build may set it with
+//
+//	go build -ldflags "-X main.version=1.2.3"
+var version = "0.1.0"
+
 func main() {
 	mygo.App.SetName("DevTools")
+	mygo.App.SetVersion(version)
 	mygo.App.WhenReady(func() {
 		// No menu: on Linux and Windows the bar would take a line off the
 		// top of the window, and this window is only its pages. On a Mac

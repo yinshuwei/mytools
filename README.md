@@ -10,6 +10,8 @@ go run ./cmd/mytools
 
 依赖 `github.com/egoist/mygo v0.5.5`；二维码用 `github.com/boombuler/barcode` 生成。
 
+窗口左下角的「设置」（或 `Cmd/Ctrl+,`）里有**帮助**（直接显示本文件的原文，它被编进了二进制）和**关于**（版本、许可、源码地址，以及这个二进制实际链接的依赖版本）。
+
 ## 功能
 
 | 工具 | 说明 |
@@ -31,6 +33,7 @@ go run ./cmd/mytools
 | `Cmd+Enter` | 按当前页面的主按钮：编码、生成、复制图片、选择图片…、从剪贴板粘贴、复制结果 |
 | `Cmd+O` | 打开该页面的文件对话框：选图片、选 Base64 文本、选 Logo |
 | `Cmd+S` | 保存为文件（图片转 Base64 页） |
+| `Cmd+,` | 打开设置（帮助 / 关于） |
 | `Cmd+Shift+Enter` | 信息编解码页的另一个方向：解码 |
 | `Cmd+F` | 查找：JSON 美化页切回树形，并把键盘放进查找框 |
 | `Enter` | 计算器页：把这条算式与结果记入历史，输入框清空等着下一条 |
@@ -41,7 +44,8 @@ go run ./cmd/mytools
 ## 目录结构
 
 ```
-cmd/mytools/          可执行入口：应用名、菜单、窗口
+doc.go                根包：把 README 编进二进制，供「帮助」显示
+cmd/mytools/          可执行入口：应用名、版本、窗口（没有菜单栏）
 internal/app/         窗口外壳：侧边栏导航、页面注册与切换
 internal/tools/       每个工具一个文件（求值器、文件对话框等旁支各另占一个），
                       各自持有状态并实现 tools.Tool
