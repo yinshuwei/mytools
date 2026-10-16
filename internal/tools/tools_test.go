@@ -1,10 +1,15 @@
 package tools
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -322,6 +327,49 @@ func TestJSONFindKeys(t *testing.T) {
 	}
 }
 
+// TestJSONInputKeepsEditing checks that the input keeps its place when the
+// text goes invalid: the line reporting the error comes and goes, which
+// must not remake the input, putting the caret back at its end and dropping
+// what undoing it would give back.
+func TestJSONInputKeepsEditing(t *testing.T) {
+	j := &JSON{}
+	tr := ui.NewTester(func(c *ui.Context) { j.View(c) }, 900, 600)
+	if err := tr.Click("JSON 输入"); err != nil {
+		t.Fatal(err)
+	}
+	tr.Type(`{"a": 1}`)
+	tr.Key(0, ui.KeyLeft)
+	tr.Key(0, ui.KeyLeft)
+	tr.Type(",") // before the 1: the text is no longer JSON
+	if j.err == "" {
+		t.Fatal("不合法了，应当报错")
+	}
+	tr.Type("x")
+	if got, want := j.input, `{"a": ,x1}`; got != want {
+		t.Errorf("输入 = %q, want %q（回车符应当还在原处）", got, want)
+	}
+}
+
+// TestJSONInputUndo checks that undoing still works after the text went
+// from invalid to valid, which must not drop the input's history.
+func TestJSONInputUndo(t *testing.T) {
+	j := &JSON{}
+	tr := ui.NewTester(func(c *ui.Context) { j.View(c) }, 900, 600)
+	if err := tr.Click("JSON 输入"); err != nil {
+		t.Fatal(err)
+	}
+	// Typing it goes invalid at once — nothing is JSON yet — and valid at
+	// the last character, so the line reporting the error comes and goes.
+	tr.Type(`{"a": 1}`)
+	if j.err != "" {
+		t.Fatalf("应当是合法的，得到 %q", j.err)
+	}
+	tr.Key(ui.Cmd, ui.KeyZ)
+	if j.input == `{"a": 1}` {
+		t.Errorf("撤销没有生效，输入还是 %q", j.input)
+	}
+}
+
 // TestQuoteJSON checks the quoting of strings.
 func TestQuoteJSON(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
@@ -454,19 +502,119 @@ func TestPassword(t *testing.T) {
 	}
 }
 
-// TestQR checks that a code is made, and dropped when the text is.
+// TestPasswordBatch checks making several passwords at once, one a line.
+func TestPasswordBatch(t *testing.T) {
+	p := &Password{length: 12, count: 6, upper: true, lower: true, digits: true}
+	p.gen()
+	if len(p.pws) != 6 {
+		t.Fatalf("生成 %d 条, want 6", len(p.pws))
+	}
+	lines := strings.Split(p.text, "\n")
+	if len(lines) != 6 {
+		t.Fatalf("文本 %d 行, want 6", len(lines))
+	}
+	for i, pw := range p.pws {
+		if lines[i] != pw {
+			t.Errorf("第 %d 行 = %q, want %q", i, lines[i], pw)
+		}
+		if n := len([]rune(pw)); n != 12 {
+			t.Errorf("第 %d 条长度 = %d, want 12", i, n)
+		}
+	}
+	// No set at all is told of, and leaves the batch shown as it was.
+	p.upper, p.lower, p.digits = false, false, false
+	p.gen()
+	if p.err == "" || len(p.pws) != 6 {
+		t.Errorf("没有字符集时应当报错并留着原来那批，得到 err=%q, %d 条", p.err, len(p.pws))
+	}
+}
+
+// logoImage is a small picture to put in the middle of a code.
+func logoImage() image.Image {
+	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	for y := range 64 {
+		for x := range 64 {
+			img.Set(x, y, color.RGBA{R: 220, G: 40, B: 40, A: 255})
+		}
+	}
+	return img
+}
+
+// TestQRCopyImage checks that the code can be copied as a picture, ready to
+// paste into a chat.
+func TestQRCopyImage(t *testing.T) {
+	q := &QR{text: "https://example.com", size: 240}
+	tr := ui.NewTester(func(c *ui.Context) { q.View(c) }, 900, 600)
+	if err := tr.Click("复制图片"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := tr.ClipboardData().Read(transfer.PNG)
+	if err != nil {
+		t.Fatalf("剪贴板里没有图片：%v", err)
+	}
+	if _, err := png.Decode(bytes.NewReader(b)); err != nil {
+		t.Errorf("复制出来的不是 PNG：%v", err)
+	}
+}
+
+// whiteEdge is how many columns of the picture are white from its left.
+func whiteEdge(img image.Image) int {
+	b := img.Bounds()
+	for x := range b.Dx() {
+		for y := range b.Dy() {
+			if r, _, _, _ := img.At(x, y).RGBA(); r != 0xffff {
+				return x
+			}
+		}
+	}
+	return b.Dx()
+}
+
+// TestQR checks making a code, changing its size, reading it back, and
+// going on to read it with a logo in its middle.
 func TestQR(t *testing.T) {
-	q := &QR{text: "https://example.com"}
+	const text = "https://example.com/hello"
+	q := &QR{text: text, size: 240, level: "M"}
 	q.sync()
-	if q.bitmap == nil || q.err != "" {
-		t.Fatalf("生成失败：err=%q bitmap=%v", q.err, q.bitmap)
+	if q.code == nil || q.err != "" {
+		t.Fatalf("生成失败：err=%q", q.err)
 	}
-	if w, h := q.bitmap.Size(); w == 0 || h == 0 || w != h {
-		t.Errorf("二维码尺寸异常：%dx%d", w, h)
+	w240, _ := q.code.Size()
+	if w240 == 0 {
+		t.Fatal("二维码没有尺寸")
 	}
+	// The code fills the picture: only the quiet zone around it is white.
+	if edge := whiteEdge(q.codeImage); edge*100/w240 > 10 {
+		t.Errorf("边缘空白占 %d%%，太多了", edge*100/w240)
+	}
+	// The size takes effect at once, without the text changing.
+	q.size = 120
+	q.sync()
+	if w120, _ := q.code.Size(); w120 >= w240 {
+		t.Errorf("改小后 = %d, want 小于 %d", w120, w240)
+	}
+	q.size = 320
+	q.sync()
+	if w320, _ := q.code.Size(); w320 <= w240 {
+		t.Errorf("改大后 = %d, want 大于 %d", w320, w240)
+	}
+	// What it holds reads back.
+	if got, err := decodeQR(q.codeImage); err != nil || got != text {
+		t.Errorf("读回 = %q, %v", got, err)
+	}
+	// A logo in the middle still reads, with the room a high level leaves.
+	q.level, q.logo, q.logoImg = "H", "logo.png", logoImage()
+	q.sync()
+	if q.code == nil {
+		t.Fatal("带 Logo 生成失败")
+	}
+	if got, err := decodeQR(q.codeImage); err != nil || got != text {
+		t.Errorf("带 Logo 读回 = %q, %v", got, err)
+	}
+	// Nothing in, nothing made.
 	q.text = ""
 	q.sync()
-	if q.bitmap != nil {
+	if q.code != nil {
 		t.Error("清空内容后不应还留着二维码")
 	}
 }

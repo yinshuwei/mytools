@@ -595,7 +595,10 @@ func (j *JSON) View(c *ui.Context) {
 		if j.err != "" {
 			ui.Text(c, "错误："+j.err).FontSize(12).TextColor(t.Danger)
 		}
-		ui.Row(c).Grow(1).FillWidth().AlignItems(ui.Stretch).Children(func() {
+		// Keyed: the line reporting an error comes and goes above it, and
+		// an unkeyed row would be built anew with it, taking the input
+		// and its undo history down with it.
+		ui.Row(c.Key("panes")).Grow(1).FillWidth().AlignItems(ui.Stretch).Children(func() {
 			ui.Column(c).Grow(1).MinWidth(0).Gap(6).Padding(0, 14, 0, 0).Children(func() {
 				widgets.Caption(c, "输入")
 				ui.TextArea(c.Key("in"), &j.input).Label("JSON 输入").
@@ -606,24 +609,18 @@ func (j *JSON) View(c *ui.Context) {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					widgets.Caption(c, "结果")
 					ui.Segmented(c.Key("mode"), &j.mode, "树形", "文本")
-					ui.Spacer(c)
-					if j.mode != 0 {
-						return
-					}
-					if ui.Button(c.Key("unfold"), "展开全部").Disabled(j.root == nil).Clicked() {
-						j.unfoldAll()
-					}
-					if ui.Button(c.Key("fold"), "折叠全部").Disabled(j.root == nil).Clicked() {
-						j.foldAll()
-					}
 				})
 				if j.mode == 0 {
-					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					// One line, as asked: the search, then its matches, then
+					// the folds. A narrow window wraps them rather than
+					// cutting them off.
+					ui.Row(c).Gap(6).Wrap().AlignItems(ui.Center).Children(func() {
 						// A text input of our own, so that the keys moving
 						// between matches are taken as they come: a search
 						// field hides the input the keys go to.
 						ui.TextInput(c.Key("find"), &j.query).Label("查找").
-							Placeholder("查找，* 匹配任意字符").Grow(1).
+							Placeholder("查找，* 匹配任意字符").
+							MinWidth(40).Grow(2).MaxWidth(180).
 							OnTextKey(func(k ui.TextKey) bool {
 								switch k.Key {
 								case ui.KeyEnter, ui.KeyDown, ui.KeyUp:
@@ -650,17 +647,28 @@ func (j *JSON) View(c *ui.Context) {
 							}
 						}
 						ui.Checkbox(c.Key("case"), &j.caseSensitive, "Aa").Tooltip("区分大小写")
+						// The buttons are kept narrow: the line holds the
+						// search, its matches and the folds in one pane.
 						if j.looking() {
 							none := len(j.found) == 0
-							if ui.Button(c.Key("prev"), "↑").Disabled(none).
+							if ui.Button(c.Key("prev"), "↑").Padding(0, 5).Disabled(none).
 								Tooltip("上一个匹配（Shift+Enter 或 ↑）").Clicked() {
 								j.step(-1)
 							}
-							widgets.Hint(c, j.count())
-							if ui.Button(c.Key("next"), "↓").Disabled(none).
+							ui.Text(c, j.count()).FontSize(12).TextColor(t.TextMuted).SingleLine()
+							if ui.Button(c.Key("next"), "↓").Padding(0, 5).Disabled(none).
 								Tooltip("下一个匹配（Enter 或 ↓）").Clicked() {
 								j.step(1)
 							}
+						}
+						ui.Spacer(c)
+						if ui.Button(c.Key("unfold"), "展开").Padding(0, 6).Disabled(j.root == nil).
+							Tooltip("展开所有层级").Clicked() {
+							j.unfoldAll()
+						}
+						if ui.Button(c.Key("fold"), "折叠").Padding(0, 6).Disabled(j.root == nil).
+							Tooltip("折叠所有层级").Clicked() {
+							j.foldAll()
 						}
 					})
 					rows := j.flat

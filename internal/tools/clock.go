@@ -222,7 +222,9 @@ func (cl *Clock) View(c *ui.Context) {
 
 	ui.Divider(c)
 
-	widgets.Field(c, "日期时间 → 时间戳（按所选时区解读）", func() {
+	// Keyed: the result of the timestamp above comes and goes, and the
+	// field must keep what is being typed in it as it does.
+	widgets.FieldKey(c, "dtfield", "日期时间 → 时间戳（按所选时区解读）", func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.TextInput(c.Key("dt"), &cl.dt).Label("日期时间").
 				Placeholder("2006-01-02 15:04:05").Width(260)

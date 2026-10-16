@@ -11,24 +11,25 @@ import (
 	"gitee.com/yinshuwei/mytools/internal/widgets"
 )
 
-// Password makes random passwords out of chosen character sets.
+// Password makes batches of random passwords out of chosen character sets.
 type Password struct {
 	inited  bool
 	length  float64
+	count   float64
 	upper   bool
 	lower   bool
 	digits  bool
 	symbols bool
 	avoid   bool // 排除易混淆字符
 
-	password string
-	history  []string
-	err      string
+	text string   // the batch, one password a line
+	pws  []string // and the same as the passwords they are
+	err  string
 }
 
 func (*Password) ID() string   { return "pw" }
 func (*Password) Name() string { return "随机密码" }
-func (*Password) Desc() string { return "按字符集生成随机密码" }
+func (*Password) Desc() string { return "按字符集批量生成随机密码" }
 
 // The character sets a password is drawn from.
 const (
@@ -103,8 +104,8 @@ func generate(length int, sets []string, avoidAmbiguous bool) (string, error) {
 	return string(out[:length]), nil
 }
 
-// gen makes a password and keeps it in the history.
-func (p *Password) gen() {
+// sets are the character sets the chosen ones make.
+func (p *Password) sets() []string {
 	var sets []string
 	if p.upper {
 		sets = append(sets, upperChars)
@@ -118,31 +119,50 @@ func (p *Password) gen() {
 	if p.symbols {
 		sets = append(sets, symbolChars)
 	}
-	pw, err := generate(int(p.length), sets, p.avoid)
-	if err != nil {
-		p.err = err.Error()
-		return
+	return sets
+}
+
+// gen makes a batch of passwords.
+func (p *Password) gen() {
+	sets := p.sets()
+	n := max(1, min(int(p.count), 200))
+	out := make([]string, 0, n)
+	for range n {
+		pw, err := generate(int(p.length), sets, p.avoid)
+		if err != nil {
+			p.err = err.Error()
+			return
+		}
+		out = append(out, pw)
 	}
-	p.err = ""
-	p.password = pw
-	p.history = append([]string{pw}, p.history...)
-	if len(p.history) > 10 {
-		p.history = p.history[:10]
-	}
+	p.pws, p.err = out, ""
+	p.text = strings.Join(out, "\n")
 }
 
 func (p *Password) View(c *ui.Context) {
 	t := c.Theme()
 	if !p.inited {
 		p.inited = true
-		p.length, p.upper, p.lower, p.digits = 16, true, true, true
+		p.length, p.count = 16, 5
+		p.upper, p.lower, p.digits = true, true, true
 		p.gen()
 	}
 
-	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-		widgets.Hint(c, "长度")
-		ui.Slider(c.Key("len"), &p.length, 4, 64).Step(1).Width(240)
-		ui.Textf(c, "%d", int(p.length)).Bold().Width(28)
+	ui.Row(c).Gap(10).Wrap().AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Gap(4).Children(func() {
+			widgets.Hint(c, "长度")
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Slider(c.Key("len"), &p.length, 4, 64).Step(1).Width(180)
+				ui.Textf(c, "%d", int(p.length)).Bold().Width(28)
+			})
+		})
+		ui.Column(c).Gap(4).Children(func() {
+			widgets.Hint(c, "数量")
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Slider(c.Key("count"), &p.count, 1, 50).Step(1).Width(180)
+				ui.Textf(c, "%d", int(p.count)).Bold().Width(28)
+			})
+		})
 	})
 	ui.Row(c).Gap(16).Wrap().Children(func() {
 		ui.Checkbox(c.Key("upper"), &p.upper, "大写 A-Z")
@@ -156,32 +176,21 @@ func (p *Password) View(c *ui.Context) {
 		if ui.PrimaryButton(c.Key("gen"), "生成").Clicked() {
 			p.gen()
 		}
+		widgets.CopyButton(c.Key("copyall"), "复制全部", p.text)
+		if len(p.pws) > 0 {
+			ui.Textf(c, "共 %d 条", len(p.pws)).FontSize(12).TextColor(t.TextMuted)
+		}
 		ui.Spacer(c)
-		if ui.Button(c.Key("clearh"), "清空记录").Disabled(len(p.history) == 0).Clicked() {
-			p.history = nil
+		if ui.Button(c.Key("clear"), "清空").Disabled(len(p.pws) == 0).Clicked() {
+			p.pws, p.text = nil, ""
 		}
 	})
 	if p.err != "" {
 		ui.Text(c, "错误："+p.err).FontSize(12).TextColor(t.Danger)
 	}
 
-	widgets.Field(c, "密码", func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.TextInput(c.Key("pw"), &p.password).Label("密码").ReadOnly(true).FontSize(16).Grow(1)
-			widgets.CopyButton(c.Key("copy"), "复制", p.password)
-		})
+	// Keyed: the line reporting an error comes and goes above it.
+	widgets.FieldKey(c, "pwsfield", "密码（每行一个）", func() {
+		widgets.Result(c, "pws", "密码", &p.text, 4, 16)
 	})
-
-	if len(p.history) > 1 {
-		widgets.Field(c, "最近生成", func() {
-			ui.Column(c).Gap(4).FillWidth().Children(func() {
-				for i, pw := range p.history[1:] {
-					ui.Row(c).Key(i).Gap(8).AlignItems(ui.Center).FillWidth().Children(func() {
-						ui.Text(c, pw).FontSize(13).TextColor(t.TextMuted).Grow(1).Selectable()
-						widgets.CopyButton(c, "复制", pw)
-					})
-				}
-			})
-		})
-	}
 }

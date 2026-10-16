@@ -2,9 +2,7 @@ package tools
 
 import (
 	"encoding/base64"
-	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 
 	"github.com/egoist/mygo"
@@ -35,19 +33,6 @@ func (*Image) Desc() string { return "把图片编码成 Base64 或 Data URI" }
 // SetWindow is what WindowAware asks of a tool acting on the window.
 func (im *Image) SetWindow(win *mygo.Window) { im.win = win }
 
-// pick is what the file dialog's goroutine sends back.
-type pick struct {
-	path string
-	data []byte
-	err  error
-}
-
-// imageFilters limits the file dialog to images.
-var imageFilters = []mygo.FileFilter{{
-	Name:       "图片",
-	Extensions: []string{"png", "jpg", "jpeg", "gif", "webp", "bmp"},
-}}
-
 // apply takes what the file dialog returned.
 func (im *Image) apply(p pick) {
 	im.busy = false
@@ -69,40 +54,6 @@ func (im *Image) apply(p pick) {
 	}
 }
 
-// choose opens the native file dialog off the main thread, so that the
-// window keeps drawing, and delivers the file on the channel.
-func (im *Image) choose(win *mygo.Window, svc ui.Services) {
-	im.busy = true
-	go func() {
-		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-			Parent:  win,
-			Title:   "选择图片",
-			Filters: imageFilters,
-		})
-		switch {
-		case err != nil:
-			im.picks <- pick{err: err}
-		case len(paths) == 0:
-			im.picks <- pick{}
-		default:
-			data, err := os.ReadFile(paths[0])
-			im.picks <- pick{path: paths[0], data: data, err: err}
-		}
-		svc.Invalidate()
-	}()
-}
-
-// humanBytes formats a size for the eye.
-func humanBytes(n int) string {
-	switch {
-	case n >= 1<<20:
-		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
-	}
-	return fmt.Sprintf("%d B", n)
-}
-
 func (im *Image) View(c *ui.Context) {
 	t := c.Theme()
 	if im.picks == nil {
@@ -112,7 +63,8 @@ func (im *Image) View(c *ui.Context) {
 
 	ui.Row(c).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
 		if ui.PrimaryButton(c.Key("pick"), "选择图片…").Disabled(im.busy).Clicked() {
-			im.choose(im.win, c.Services())
+			im.busy = true
+			pickFile(im.win, c.Services(), "选择图片", imageFilters, im.picks)
 		}
 		if im.busy {
 			widgets.Hint(c, "等待选择…")

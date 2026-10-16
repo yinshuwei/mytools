@@ -109,7 +109,8 @@ func (cd *Codec) View(c *ui.Context) {
 	if cd.err != "" {
 		ui.Text(c, "错误："+cd.err).FontSize(12).TextColor(t.Danger)
 	}
-	widgets.Field(c, "结果", func() {
+	// Keyed: the line reporting an error comes and goes above it.
+	widgets.FieldKey(c, "outfield", "结果", func() {
 		widgets.Result(c, "out", "结果", &cd.out, 5, 14)
 	})
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {

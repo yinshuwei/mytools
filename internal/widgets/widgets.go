@@ -21,6 +21,16 @@ func Field(c *ui.Context, name string, build func()) {
 	})
 }
 
+// FieldKey is Field with a key, for a field whose siblings come and go: the
+// field then keeps its identity, and so what is being edited in it, the
+// caret and the undo history included, as the siblings change.
+func FieldKey(c *ui.Context, key any, name string, build func()) {
+	ui.Column(c.Key(key)).Gap(6).FillWidth().Children(func() {
+		Caption(c, name)
+		build()
+	})
+}
+
 // CopyButton copies s to the clipboard, saying so in a toast.
 func CopyButton(c *ui.Context, label, s string) ui.Element {
 	b := ui.Button(c, label)
