@@ -8,7 +8,7 @@ import (
 
 // wants is something only one page shows, to tell that it built.
 var wants = map[string]string{
-	"json":  "JSON 结果",
+	"json":  "树形",
 	"codec": "编码方式",
 	"clock": "日期时间 → 时间戳",
 	"qr":    "纠错级别",

@@ -61,11 +61,17 @@ func (a *App) View(c *ui.Context) {
 				ui.Text(c, cur.Name()).Bold().FontSize(16)
 				ui.Text(c, cur.Desc()).FontSize(12).TextColor(t.TextMuted)
 			})
-			ui.Scroll(c).Grow(1).FillWidth().Children(func() {
-				ui.Column(c).Padding(16, 20, 24, 20).Gap(14).FillWidth().Children(func() {
+			if fh, ok := cur.(tools.FillsHeight); ok && fh.FillsHeight() {
+				ui.Column(c).Grow(1).FillWidth().Padding(16, 20).Children(func() {
 					cur.View(c)
 				})
-			})
+			} else {
+				ui.Scroll(c).Grow(1).FillWidth().Children(func() {
+					ui.Column(c).Padding(16, 20, 24, 20).Gap(14).FillWidth().Children(func() {
+						cur.View(c)
+					})
+				})
+			}
 		})
 	})
 }

@@ -23,6 +23,12 @@ type WindowAware interface {
 	SetWindow(*mygo.Window)
 }
 
+// A FillsHeight tool takes the whole content area, instead of being
+// scrolled as one column: it lays out and scrolls its own panes.
+type FillsHeight interface {
+	FillsHeight() bool
+}
+
 // All returns the tools of the toolbox, in the order of the sidebar.
 func All() []Tool {
 	return []Tool{
