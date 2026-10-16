@@ -134,19 +134,18 @@ func TestMatch(t *testing.T) {
 	}
 }
 
-// names is the names of the rows shown, for telling what a search kept.
-func names(j *JSON) string {
-	var b strings.Builder
-	for _, r := range j.flat {
-		if !r.close {
-			b.WriteString(" " + r.node.key)
+// currentRow is the line showing the current match, -1 when none does.
+func currentRow(j *JSON) int {
+	for i, r := range j.flat {
+		if r.current {
+			return i
 		}
 	}
-	return b.String()
+	return -1
 }
 
-// TestJSONFind checks that looking narrows the tree to what matches and the
-// path to it.
+// TestJSONFind checks that looking finds every match in order, and that
+// going to one shows it, without taking anything out of the tree.
 func TestJSONFind(t *testing.T) {
 	j := &JSON{input: `{"user":{"name":"Ada","city":"Paris"},"count":3,"other":{"name":"Bob"}}`}
 	j.sync()
@@ -157,57 +156,85 @@ func TestJSONFind(t *testing.T) {
 
 	j.query = "name"
 	j.sync()
-	if j.matches != 2 {
-		t.Errorf("匹配数 = %d, want 2", j.matches)
+	if len(j.found) != 2 {
+		t.Fatalf("匹配数 = %d, want 2", len(j.found))
 	}
-	if len(j.flat) >= all {
-		t.Errorf("查找后行数 = %d，应当比原来的 %d 少", len(j.flat), all)
+	// Looking takes nothing out of the tree.
+	if len(j.flat) != all {
+		t.Errorf("查找后行数 = %d, want %d（不过滤）", len(j.flat), all)
 	}
-	// The containers on the way to a match show too.
-	if !strings.Contains(names(j), " user") || !strings.Contains(names(j), " other") {
-		t.Errorf("应当显示到匹配的路径，得到 %q", names(j))
+	lines := 0
+	for _, r := range j.flat {
+		if r.match {
+			lines++
+		}
 	}
-	// Looking for a container keeps what is inside it.
-	j.query = "user"
-	j.sync()
-	if j.matches != 1 {
-		t.Errorf("匹配数 = %d, want 1", j.matches)
+	if lines != 2 {
+		t.Errorf("高亮的行 = %d, want 2", lines)
 	}
-	if !strings.Contains(names(j), " name") || !strings.Contains(names(j), " city") {
-		t.Errorf("匹配到的容器里的内容应当都在，得到 %q", names(j))
+	// A new query looks at its first match, which shows.
+	if j.at != 0 {
+		t.Errorf("当前匹配 = %d, want 0", j.at)
 	}
-	// A value is found by its text, and what is beside it is not.
+	if currentRow(j) < 0 {
+		t.Error("当前匹配的行应当显示出来")
+	}
+	if got := j.count(); got != "1/2" {
+		t.Errorf("计数 = %q, want 1/2", got)
+	}
+	// Going on wraps round, both ways.
+	j.step(1)
+	if j.at != 1 {
+		t.Errorf("下一个 = %d, want 1", j.at)
+	}
+	if got := j.count(); got != "2/2" {
+		t.Errorf("计数 = %q, want 2/2", got)
+	}
+	j.step(1)
+	if j.at != 0 {
+		t.Errorf("再下一个应当回到开头，得到 %d", j.at)
+	}
+	j.step(-1)
+	if j.at != 1 {
+		t.Errorf("上一个应当回到末尾，得到 %d", j.at)
+	}
+	// Going to a match opens what holds it, and says where to scroll.
+	j.foldAll()
+	j.step(1)
+	row := currentRow(j)
+	if row < 0 {
+		t.Fatal("折叠起来后走到匹配，应当把它展开")
+	}
+	if row != j.toShow {
+		t.Errorf("应当滚动到当前匹配：行 %d，滚动到 %d", row, j.toShow)
+	}
+	// A value is found by its text.
 	j.query = "Bob"
 	j.sync()
-	if j.matches != 1 {
-		t.Errorf("按值查找 = %d 个匹配，want 1", j.matches)
+	if len(j.found) != 1 || j.at != 0 {
+		t.Errorf("按值查找 = %d 个匹配，当前 %d", len(j.found), j.at)
 	}
-	if !strings.Contains(names(j), " other") || strings.Contains(names(j), " user") {
-		t.Errorf("只该留下 Bob 那条路径，得到 %q", names(j))
-	}
-	// Nothing found leaves nothing to show.
+	// Nothing found leaves the tree alone, and goes nowhere.
 	j.query = "nowhere*at*all"
 	j.sync()
-	if len(j.flat) != 0 || j.matches != 0 {
-		t.Errorf("无匹配时不该有行，得到 %d 行 %d 匹配", len(j.flat), j.matches)
+	if len(j.found) != 0 || j.at != -1 {
+		t.Errorf("无匹配时 = %d 个匹配，当前 %d", len(j.found), j.at)
 	}
-	// Clearing the query brings the whole document back.
-	j.query = ""
-	j.sync()
+	if got := j.count(); got != "无匹配" {
+		t.Errorf("计数 = %q, want 无匹配", got)
+	}
+	j.step(1)
+	if j.at != -1 {
+		t.Errorf("没有匹配时走不动，当前 %d", j.at)
+	}
 	if len(j.flat) != all {
-		t.Errorf("清空查找后行数 = %d, want %d", len(j.flat), all)
+		t.Errorf("无匹配时树应当照旧，行数 = %d, want %d", len(j.flat), all)
 	}
-	// Folding while looking holds, and shows again once the query is gone.
-	j.query = "Ada"
-	j.sync()
-	j.foldAll()
+	// Clearing the query drops the matches.
 	j.query = ""
 	j.sync()
-	if len(j.flat) != 5 {
-		t.Errorf("清空查找后应当回到折叠状态（5 行），得到 %d", len(j.flat))
-	}
-	if !j.flat[1].folded || j.flat[1].node.key != "user" {
-		t.Errorf("user 应当仍然折叠，得到 %+v", j.flat[1])
+	if len(j.found) != 0 || j.at != -1 || currentRow(j) >= 0 {
+		t.Errorf("清空查找后还有 %d 个匹配，当前 %d", len(j.found), j.at)
 	}
 }
 
@@ -255,6 +282,43 @@ func TestJSONClickCopy(t *testing.T) {
 	}
 	if got := tr.Clipboard(); got != `"Ada"` {
 		t.Errorf("点击箭头不该复制，剪贴板变成 %q", got)
+	}
+}
+
+// TestJSONFindKeys checks the keys that move between matches: Enter or
+// Down goes to the next one, Shift+Enter or Up to the one before.
+func TestJSONFindKeys(t *testing.T) {
+	j := &JSON{input: `{"a":{"name":"one"},"b":{"name":"two"},"c":{"name":"three"}}`}
+	tr := ui.NewTester(func(c *ui.Context) { j.View(c) }, 700, 500)
+	if err := tr.Click("查找"); err != nil {
+		t.Fatal(err)
+	}
+	tr.Type("name")
+	if len(j.found) != 3 {
+		t.Fatalf("匹配数 = %d, want 3", len(j.found))
+	}
+	for _, tc := range []struct {
+		mods ui.Modifiers
+		key  ui.Key
+		want int
+	}{
+		{0, ui.KeyEnter, 1},
+		{ui.Shift, ui.KeyEnter, 0},
+		{0, ui.KeyDown, 1},
+		{0, ui.KeyDown, 2},
+		{ui.Shift, ui.KeyEnter, 1},
+		{0, ui.KeyUp, 0},
+		{ui.Shift, ui.KeyEnter, 2}, // wraps back to the last
+	} {
+		tr.Key(tc.mods, tc.key)
+		if j.at != tc.want {
+			t.Errorf("%v+%v 后当前 = %d, want %d", tc.mods, tc.key, j.at, tc.want)
+		}
+	}
+	// The match gone to shows, wherever it is (the frames the tester ran
+	// took the scroll it asked for).
+	if currentRow(j) < 0 {
+		t.Error("当前匹配的行应当显示出来")
 	}
 }
 

@@ -83,15 +83,37 @@ func (cl *Clock) location() (*time.Location, error) {
 	return loc, nil
 }
 
-// zoneLabel describes where the times are: the zone's name, and how far it
-// is from UTC in effect.
-func zoneLabel(loc *time.Location) string {
-	name, offset := time.Now().In(loc).Zone()
+// zoneOffset is how far loc is from UTC now, as UTC+08:00.
+func zoneOffset(loc *time.Location) string {
+	_, offset := time.Now().In(loc).Zone()
 	sign := "+"
 	if offset < 0 {
 		sign, offset = "-", -offset
 	}
-	return fmt.Sprintf("%s UTC%s%02d:%02d", name, sign, offset/3600, offset%3600/60)
+	return fmt.Sprintf("UTC%s%02d:%02d", sign, offset/3600, offset%3600/60)
+}
+
+// zoneChoice is how a zone shows in the select: its name, and how far it is
+// from UTC now.
+func zoneChoice(zone string) string {
+	switch zone {
+	case localZone:
+		return localZone + " " + zoneOffset(time.Local)
+	case customZone:
+		return customZone
+	}
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		return zone
+	}
+	return zone + " " + zoneOffset(loc)
+}
+
+// zoneLabel describes where the times are: the zone's abbreviation, and how
+// far it is from UTC in effect.
+func zoneLabel(loc *time.Location) string {
+	name, _ := time.Now().In(loc).Zone()
+	return name + " " + zoneOffset(loc)
 }
 
 // parseTime reads the date and time the user typed, in loc.
@@ -130,9 +152,23 @@ func (cl *Clock) View(c *ui.Context) {
 	// Tick twice a second so the clock stays current.
 	c.After(500 * time.Millisecond)
 
+	// The select shows each zone with how far it is from UTC, so what it
+	// holds is that line, and the zone is looked up from it.
+	choices := make([]string, len(zones))
+	for i, z := range zones {
+		choices[i] = zoneChoice(z)
+	}
+	choice := zoneChoice(cl.tz)
 	ui.Row(c).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
 		widgets.Hint(c, "时区")
-		ui.Select(c.Key("tz"), &cl.tz, zones).Width(190)
+		if ui.Select(c.Key("tz"), &choice, choices).Width(230).Changed() {
+			for i, ch := range choices {
+				if ch == choice {
+					cl.tz = zones[i]
+					break
+				}
+			}
+		}
 		if cl.tz == customZone {
 			ui.TextInput(c.Key("tzname"), &cl.custom).Label("时区名").
 				Placeholder("Asia/Shanghai").Width(170)
