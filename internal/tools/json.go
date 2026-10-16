@@ -625,26 +625,29 @@ func (j *JSON) row(c *ui.Context, rows []row, i int) {
 				ui.Box(c).Width(float32(n.depth) * 14).Shrink(0)
 			}
 			ui.Box(c).Width(14).Shrink(0)
-			ui.Text(c, n.closeBrace()).TextColor(t.TextMuted).SingleLine()
+			ui.Text(c, n.closeBrace()).TextColor(t.TextMuted).SingleLine().
+				Tooltip(n.path + "（点击复制整块）")
 		})
+		box.Cursor(ui.CursorCopy)
+		if box.Clicked() {
+			j.copyPart(c, n, partBlock)
+		}
 		return
 	}
 	box.ContextMenu(func(m *ui.Menu) {
 		if m.Item("复制此块").Chosen() {
-			j.copyBlock(c, n)
+			j.copyPart(c, n, partBlock)
 		}
 		// A member of an object has a name of its own; a string has a
 		// content without the quotes around it.
 		if !n.item && n.key != "" {
 			if m.Item("复制名字").Chosen() {
-				c.WriteClipboard(n.key)
-				c.Toast("已复制名字")
+				j.copyPart(c, n, partName)
 			}
 		}
 		if n.kind == 's' {
 			if m.Item("复制字符串内容").Chosen() {
-				c.WriteClipboard(n.raw)
-				c.Toast("已复制字符串内容")
+				j.copyPart(c, n, partValue)
 			}
 		}
 		if n.container() {
@@ -657,6 +660,7 @@ func (j *JSON) row(c *ui.Context, rows []row, i int) {
 			}
 		}
 	})
+	var name, value ui.Element
 	box.Children(func() {
 		if n.depth > 0 {
 			ui.Box(c).Width(float32(n.depth) * 14).Shrink(0)
@@ -677,7 +681,8 @@ func (j *JSON) row(c *ui.Context, rows []row, i int) {
 		if n.item {
 			ui.Text(c, strconv.Itoa(n.index)+":").TextColor(t.TextMuted).SingleLine().Shrink(0)
 		} else if n.key != "" {
-			ui.Text(c, quoteJSON(n.key)+":").TextColor(t.Accent).SingleLine().Shrink(0).Tooltip(n.path)
+			name = ui.Text(c, quoteJSON(n.key)+":").TextColor(t.Accent).SingleLine().Shrink(0).
+				Tooltip(n.path + "（点击复制名字）").Cursor(ui.CursorCopy)
 		}
 		switch {
 		case n.container():
@@ -685,29 +690,74 @@ func (j *JSON) row(c *ui.Context, rows []row, i int) {
 			if n.kind == '[' {
 				open = "["
 			}
+			tip := n.path + "（点击复制整块）"
 			switch {
 			case len(n.kids) == 0:
-				ui.Text(c, open+n.closeBrace()).TextColor(t.TextMuted).SingleLine().Shrink(0)
+				value = ui.Text(c, open+n.closeBrace()).TextColor(t.TextMuted).SingleLine().
+					Shrink(0).Tooltip(tip).Cursor(ui.CursorCopy)
 			case r.folded:
-				ui.Text(c, open+"…"+n.closeBrace()).TextColor(t.TextMuted).SingleLine().Shrink(0)
+				value = ui.Text(c, open+"…"+n.closeBrace()).TextColor(t.TextMuted).SingleLine().
+					Shrink(0).Tooltip(tip).Cursor(ui.CursorCopy)
 				if !j.looking() {
 					widgets.Hint(c, fmt.Sprintf("%d 项", len(n.kids)))
 				}
 			default:
-				ui.Text(c, open).TextColor(t.TextMuted).SingleLine().Shrink(0)
+				value = ui.Text(c, open).TextColor(t.TextMuted).SingleLine().
+					Shrink(0).Tooltip(tip).Cursor(ui.CursorCopy)
 			}
 		default:
-			ui.Text(c, n.text).TextColor(valueColor(t, n)).SingleLine().Tooltip(n.path)
+			value = ui.Text(c, n.text).TextColor(valueColor(t, n)).SingleLine().
+				Tooltip(n.path + "（点击复制内容）").Cursor(ui.CursorCopy)
 		}
 		ui.Spacer(c)
 		if ui.Button(c.Key("copy"), "复制").FontSize(11).Padding(0, 6).Shrink(0).Clicked() {
 			j.copyBlock(c, n)
 		}
 	})
+	// A click copies what it landed on: the name, the value, or, anywhere
+	// else on the line, the whole block.
+	box.Cursor(ui.CursorCopy)
+	if box.Clicked() {
+		switch {
+		case name.Hovered():
+			j.copyPart(c, n, partName)
+		case value.Hovered():
+			j.copyPart(c, n, partValue)
+		default:
+			j.copyBlock(c, n)
+		}
+	}
 }
 
 // copyBlock puts the block of n on the clipboard.
 func (j *JSON) copyBlock(c *ui.Context, n *jnode) {
 	c.WriteClipboard(j.block(n))
 	c.Toast("已复制此块")
+}
+
+// jsonPart is what a click on a line of the tree copies.
+type jsonPart int
+
+const (
+	partBlock jsonPart = iota // the value as JSON
+	partName                  // the name of a member
+	partValue                 // a value's own content
+)
+
+// copyPart copies what a click on part of a line asks for. A container has
+// no content of its own, so a click on its brace copies the whole block.
+func (j *JSON) copyPart(c *ui.Context, n *jnode, part jsonPart) {
+	switch {
+	case part == partName:
+		c.WriteClipboard(n.key)
+		c.Toast("已复制名字")
+	case part == partValue && n.kind == 's':
+		c.WriteClipboard(n.raw)
+		c.Toast("已复制字符串内容")
+	case part == partValue && !n.container():
+		c.WriteClipboard(n.text)
+		c.Toast("已复制值")
+	default:
+		j.copyBlock(c, n)
+	}
 }

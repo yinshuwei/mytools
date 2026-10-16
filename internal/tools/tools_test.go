@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/ui"
 )
 
 // TestJSONTree checks the parse, the output and the folding.
@@ -206,6 +208,53 @@ func TestJSONFind(t *testing.T) {
 	}
 	if !j.flat[1].folded || j.flat[1].node.key != "user" {
 		t.Errorf("user 应当仍然折叠，得到 %+v", j.flat[1])
+	}
+}
+
+// TestJSONClickCopy checks what a click on a line of the tree copies: the
+// name it lands on, the value's content, or the whole block.
+func TestJSONClickCopy(t *testing.T) {
+	j := &JSON{input: `{"name":"Ada","n":7,"tags":["a"]}`}
+	tr := ui.NewTester(func(c *ui.Context) { j.View(c) }, 700, 500)
+	block := "[\n  \"a\"\n]"
+	for _, tc := range []struct {
+		find string // what to click, by the text it shows
+		want string
+	}{
+		{`"name":`, "name"},
+		{`"Ada"`, "Ada"},
+		{`"n":`, "n"},
+		{"7", "7"},
+		{`"tags":`, "tags"},
+		{"[", block},
+		{"]", block},
+		{`"a"`, "a"},
+	} {
+		if err := tr.Click(tc.find); err != nil {
+			t.Fatalf("找不到 %q：%v", tc.find, err)
+		}
+		if got := tr.Clipboard(); got != tc.want {
+			t.Errorf("点击 %q 复制到 %q, want %q", tc.find, got, tc.want)
+		}
+	}
+	// Anywhere else on a line copies its block.
+	r, ok := tr.Find(`"Ada"`)
+	if !ok {
+		t.Fatal("找不到值")
+	}
+	tr.ClickAt(r.X+r.W+24, r.Y+r.H/2)
+	if got, want := tr.Clipboard(), `"Ada"`; got != want {
+		t.Errorf("点击行的空白处复制到 %q, want %q", got, want)
+	}
+	// The fold arrow folds, and copies nothing.
+	if err := tr.Click("▾"); err != nil {
+		t.Fatal(err)
+	}
+	if len(j.flat) != 1 {
+		t.Errorf("点击箭头后行数 = %d, want 1", len(j.flat))
+	}
+	if got := tr.Clipboard(); got != `"Ada"` {
+		t.Errorf("点击箭头不该复制，剪贴板变成 %q", got)
 	}
 }
 
