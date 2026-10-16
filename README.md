@@ -12,6 +12,11 @@ go run ./cmd/mytools
 
 窗口左下角的「设置」（或 `Cmd/Ctrl+,`）里有**帮助**（把本文件渲染成 HTML，放进 web view 显示，配色跟着窗口主题走；这台机器上取不到 web view 时退回原文文本）和**关于**（版本、许可、源码地址，以及这个二进制实际链接的依赖版本）。
 
+帮助页的 web 引擎是**第一次打开设置时**、并且**在帧与帧之间**起起来的，不在某一帧里：整个引擎在一片帧的构建过程中创建，会把那一帧呈现用的 GL 上下文弄坏，进程会直接 abort（`epoxy: Couldn't find current GLX or EGL context`）。引擎起来要一小会儿，这期间面板上显示「正在准备帮助页…」。启动时还顺手设了 `WEBKIT_DISABLE_COMPOSITING_MODE=1`，让 WebKit 在没有 GPU 的机器上别去碰 GL。两个逃生开关：
+
+- `MYGO_GPU=0`：让 mygo 完全不用 OpenGL 画窗口（GL 驱动老旧、虚拟机、远程显示上窗口发花或崩溃时用）；
+- `MYTOOLS_NO_WEBVIEW=1`：帮助页不碰 web view，直接显示原文。
+
 ## 功能
 
 | 工具 | 说明 |

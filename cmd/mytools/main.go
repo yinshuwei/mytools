@@ -6,6 +6,7 @@ package main
 
 import (
 	"log"
+	"os"
 	"runtime"
 
 	"github.com/egoist/mygo"
@@ -20,6 +21,15 @@ import (
 var version = "0.1.0"
 
 func main() {
+	// WebKit draws through the GPU unless told not to. On a machine where
+	// the window itself draws without one — a VM, a container, a remote
+	// display — starting the web engine that way leaves the GL context
+	// the window presents with broken, and the process aborts outright
+	// (epoxy: "Couldn't find current GLX or EGL context"). The help page
+	// is text; it loses nothing drawn on the CPU.
+	if os.Getenv("WEBKIT_DISABLE_COMPOSITING_MODE") == "" {
+		_ = os.Setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
+	}
 	mygo.App.SetName("MyTools")
 	mygo.App.SetVersion(version)
 	mygo.App.WhenReady(func() {

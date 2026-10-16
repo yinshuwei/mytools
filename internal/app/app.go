@@ -30,11 +30,22 @@ type App struct {
 	helpWeb *mygo.WebView
 	helpKey string // the colors it was last loaded with
 	helpErr string // why the readme is shown as text instead
+
+	// helpMaking is set while the engine is coming up beside the frames,
+	// and helpMade carries what it came up with.
+	helpMaking bool
+	helpMade   chan helpStart
+}
+
+// helpStart is what making the help page came to.
+type helpStart struct {
+	view *mygo.WebView
+	err  error
 }
 
 // New makes the toolbox with every tool.
 func New() *App {
-	a := &App{tools: tools.All(), help: mytools.Readme}
+	a := &App{tools: tools.All(), help: mytools.Readme, helpMade: make(chan helpStart, 1)}
 	a.selected = a.tools[0].ID()
 	return a
 }
@@ -64,6 +75,16 @@ func (a *App) current() tools.Tool {
 // and the settings over both when they are up.
 func (a *App) View(c *ui.Context) {
 	t := c.Theme()
+	// What the help page's engine came up with, made while the frames
+	// went on.
+	widgets.Drain(a.helpMade, func(made helpStart) {
+		a.helpMaking = false
+		if made.err != nil {
+			a.helpErr = made.err.Error()
+			return
+		}
+		a.helpWeb, a.helpKey = made.view, ""
+	})
 	// Cmd+, opens the settings, as Preferences does elsewhere.
 	if c.Shortcut(ui.Cmd, ui.KeyComma) {
 		a.settings = true
@@ -143,7 +164,14 @@ func (a *App) settingsView(c *ui.Context, t *ui.Theme) {
 // a machine where no web view can be had, as the text it is.
 func (a *App) helpView(c *ui.Context, t *ui.Theme) {
 	view, err := a.helpPageView(t)
-	if view == nil {
+	switch {
+	case view != nil:
+		ui.WebView(c, view).Label("帮助").Grow(1).Radius(8).Border(1, t.Border)
+	case errors.Is(err, errHelpStarting):
+		ui.Column(c).Grow(1).Center().Children(func() {
+			widgets.Hint(c, "正在准备帮助页…")
+		})
+	default:
 		if a.helpErr == "" {
 			a.helpErr = err.Error()
 		}
@@ -152,31 +180,50 @@ func (a *App) helpView(c *ui.Context, t *ui.Theme) {
 		// tables of the readme keep their shape.
 		ui.TextArea(c.Key("help"), &a.help).Label("帮助").
 			ReadOnly(true).Font("monospace").FontSize(12).FillWidth().Grow(1)
-		return
 	}
-	ui.WebView(c, view).Label("帮助").Grow(1).Radius(8).Border(1, t.Border)
 }
 
-// helpPageView makes the page of the readme, once, and loads it again when
-// the window's colors change under it.
+// errHelpStarting says the page is being made, which is no failure: the
+// panel says so and asks again on the frame after.
+var errHelpStarting = errors.New("正在准备")
+
+// helpPageView returns the page the readme is shown in, starting it when it
+// is not up yet.
+//
+// The engine is brought up beside the frames and not inside one: it takes a
+// moment, and — with GL — a web engine made in the middle of a frame leaves
+// the context the frame is presented with in a state that aborts the whole
+// process. What it makes is taken on the frame after, through helpMade.
 func (a *App) helpPageView(t *ui.Theme) (*mygo.WebView, error) {
-	if a.helpWeb == nil || a.helpWeb.IsDestroyed() {
-		if a.win == nil {
-			return nil, errors.New("窗口还没有建好")
+	if a.helpWeb != nil && !a.helpWeb.IsDestroyed() {
+		// Dress it again when the window's colors change under it.
+		if style := helpStyle(t); style != a.helpKey {
+			a.helpKey = style
+			a.helpWeb.Page().LoadHTML(helpDocument(style), "")
 		}
-		view, err := a.win.NewWebView(mygo.WebViewOptions{
-			BackgroundColor: cssColor(t.Background),
-		})
-		if err != nil {
-			return nil, err
-		}
-		a.helpWeb, a.helpKey = view, ""
+		return a.helpWeb, nil
 	}
-	if style := helpStyle(t); style != a.helpKey {
-		a.helpKey = style
-		a.helpWeb.Page().LoadHTML(helpDocument(style), "")
+	if a.helpErr != "" {
+		return nil, errors.New(a.helpErr)
 	}
-	return a.helpWeb, nil
+	if helpAsText {
+		return nil, errors.New("MYTOOLS_NO_WEBVIEW 开着")
+	}
+	if a.helpMaking {
+		return nil, errHelpStarting
+	}
+	if a.win == nil {
+		return nil, errors.New("窗口还没有建好")
+	}
+	a.helpMaking = true
+	win, made := a.win, a.helpMade
+	bg := cssColor(t.Background)
+	go func() {
+		view, err := win.NewWebView(mygo.WebViewOptions{BackgroundColor: bg})
+		made <- helpStart{view: view, err: err}
+		win.Invalidate()
+	}()
+	return nil, errHelpStarting
 }
 
 // about says what the toolbox is, what it was built with, and how it is

@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	stdhtml "html"
+	"os"
 	"strings"
 	"sync"
 
@@ -12,6 +13,10 @@ import (
 
 	mytools "gitee.com/yinshuwei/mytools"
 )
+
+// helpAsText is set by MYTOOLS_NO_WEBVIEW, which asks for the readme as the
+// text it is: for a machine where the web engine cannot draw at all.
+var helpAsText = os.Getenv("MYTOOLS_NO_WEBVIEW") != ""
 
 // markdown renders the readme. The extensions are GitHub's, which is what
 // the readme is written in: tables above all, and autolinks.
