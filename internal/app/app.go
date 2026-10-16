@@ -20,7 +20,8 @@ type App struct {
 	selected string // the ID of the tool shown
 
 	win      *mygo.Window
-	settings bool   // the settings panel is up
+	picked   string // the tool the sidebar had last, to tell a pick from a redraw
+	settings bool   // the settings page is the one shown
 	panel    int    // 0 帮助, 1 关于
 	help     string // the readme, carried in the binary
 
@@ -47,6 +48,7 @@ type helpStart struct {
 func New() *App {
 	a := &App{tools: tools.All(), help: mytools.Readme, helpMade: make(chan helpStart, 1)}
 	a.selected = a.tools[0].ID()
+	a.picked = a.selected
 	return a
 }
 
@@ -71,8 +73,10 @@ func (a *App) current() tools.Tool {
 	return a.tools[0]
 }
 
-// View builds the window: the sidebar on the left, the page on the right,
-// and the settings over both when they are up.
+// View builds the window: the sidebar on the left, the page on the right.
+// The settings are a page of their own rather than a panel over one: what
+// they show — a readme — wants the room, and a page can be left by picking
+// a tool in the sidebar, as a panel cannot.
 func (a *App) View(c *ui.Context) {
 	t := c.Theme()
 	// What the help page's engine came up with, made while the frames
@@ -89,7 +93,16 @@ func (a *App) View(c *ui.Context) {
 	if c.Shortcut(ui.Cmd, ui.KeyComma) {
 		a.settings = true
 	}
-	cur := a.current()
+	// Moving the selection with the keyboard is leaving the settings too:
+	// the page the sidebar names is what the window is for.
+	if a.selected != a.picked {
+		a.picked, a.settings = a.selected, false
+	}
+	// Escape leaves them too; nothing else is up to take it, the pages
+	// being unbuilt while the settings show.
+	if a.settings && c.Shortcut(0, ui.KeyEscape) {
+		a.settings = false
+	}
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 		ui.Column(c).Width(190).Shrink(0).PaddingY(12).Gap(6).Background(t.Surface).Children(func() {
 			ui.Row(c).PaddingX(16).Children(func() {
@@ -97,7 +110,12 @@ func (a *App) View(c *ui.Context) {
 			})
 			ui.Sidebar(c, &a.selected, func() {
 				for _, tl := range a.tools {
-					ui.SidebarItem(c, tl.ID(), nil, tl.Name())
+					// Any click is a way out of the settings, the item
+					// already picked included: a sidebar picks pages,
+					// and setting the same one again still shows it.
+					if ui.SidebarItem(c, tl.ID(), nil, tl.Name()).Clicked() {
+						a.settings = false
+					}
 				}
 			}).Grow(1).Label("工具")
 			// In the corner under the tools, out of the way of them.
@@ -110,53 +128,58 @@ func (a *App) View(c *ui.Context) {
 		})
 		ui.Column(c).Grow(1).MinWidth(0).FillHeight().Children(func() {
 			ui.Column(c).Padding(14, 20).Gap(2).FillWidth().BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-				ui.Text(c, cur.Name()).Bold().FontSize(16)
-				ui.Text(c, cur.Desc()).FontSize(12).TextColor(t.TextMuted)
+				name, desc := a.current().Name(), a.current().Desc()
+				if a.settings {
+					name, desc = "设置", "帮助与关于"
+				}
+				ui.Text(c, name).Bold().FontSize(16)
+				ui.Text(c, desc).FontSize(12).TextColor(t.TextMuted)
 			})
-			if fh, ok := cur.(tools.FillsHeight); ok && fh.FillsHeight() {
-				ui.Column(c).Grow(1).FillWidth().Padding(16, 20).Children(func() {
-					cur.View(c)
-				})
-			} else {
-				ui.Scroll(c).Grow(1).FillWidth().Children(func() {
-					ui.Column(c).Padding(16, 20, 24, 20).Gap(14).FillWidth().Children(func() {
-						cur.View(c)
-					})
-				})
-			}
+			a.page(c, t)
 		})
 	})
-	a.settingsView(c, t)
 }
 
-// settingsView is the settings panel over the pages: what the toolbox says
-// about itself. Escape and a click outside close it, as a modal does.
-func (a *App) settingsView(c *ui.Context, t *ui.Theme) {
-	if !a.settings {
+// page fills the room under the heading: the settings, or the tool the
+// sidebar has picked.
+func (a *App) page(c *ui.Context, t *ui.Theme) {
+	if a.settings {
+		ui.Column(c).Grow(1).FillWidth().Padding(16, 20).Children(func() {
+			a.settingsPage(c, t)
+		})
 		return
 	}
-	// As large as the window has room for, so that the readme has a page
-	// to scroll in whatever it is read on.
-	w, h := c.Size()
-	ui.Modal(c, &a.settings, func() {
-		ui.Column(c).Gap(10).Width(min(w-100, 760)).Height(min(h-140, 560)).Children(func() {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "设置").FontSize(17).Bold()
-				ui.Spacer(c)
-				ui.Segmented(c.Key("panel"), &a.panel, "帮助", "关于")
-			})
-			ui.Divider(c)
-			if a.panel == 0 {
-				a.helpView(c, t)
-			} else {
-				ui.Scroll(c).Grow(1).FillWidth().Children(func() { a.about(c, t) })
-			}
-			ui.Row(c).Justify(ui.End).Children(func() {
-				if ui.PrimaryButton(c.Key("done"), "完成").Clicked() {
-					a.settings = false
-				}
-			})
+	cur := a.current()
+	if fh, ok := cur.(tools.FillsHeight); ok && fh.FillsHeight() {
+		ui.Column(c).Grow(1).FillWidth().Padding(16, 20).Children(func() {
+			cur.View(c)
 		})
+		return
+	}
+	ui.Scroll(c).Grow(1).FillWidth().Children(func() {
+		ui.Column(c).Padding(16, 20, 24, 20).Gap(14).FillWidth().Children(func() {
+			cur.View(c)
+		})
+	})
+}
+
+// settingsPage is what the toolbox says about itself: the readme, or what
+// it is and what it is built with.
+func (a *App) settingsPage(c *ui.Context, t *ui.Theme) {
+	ui.Column(c).FillWidth().FillHeight().Gap(10).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Segmented(c.Key("panel"), &a.panel, "帮助", "关于")
+			ui.Spacer(c)
+			if ui.Button(c.Key("back"), "回到工具").Tooltip("也可以按 Esc，或点左边的工具").
+				Clicked() {
+				a.settings = false
+			}
+		})
+		if a.panel == 0 {
+			a.helpView(c, t)
+		} else {
+			ui.Scroll(c).Grow(1).FillWidth().Children(func() { a.about(c, t) })
+		}
 	})
 }
 

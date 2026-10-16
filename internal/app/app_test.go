@@ -35,9 +35,9 @@ func TestPagesRender(t *testing.T) {
 	}
 }
 
-// TestSettings checks the settings panel: the button in the corner and
-// Cmd+, open it, Help holds the readme, About says what the toolbox is, and
-// Escape closes it as a modal.
+// TestSettings checks the settings page: the button in the corner and Cmd+,
+// open it, Help holds the readme, About says what the toolbox is, Escape
+// leaves it, and so does picking a tool in the sidebar.
 func TestSettings(t *testing.T) {
 	a := New()
 	tr := ui.NewTester(a.View, 1000, 760)
@@ -47,13 +47,16 @@ func TestSettings(t *testing.T) {
 	}
 	tr.Key(0, ui.KeyEscape)
 	if a.settings {
-		t.Fatal("Esc 没有关掉设置")
+		t.Fatal("Esc 没有离开设置")
 	}
 	if err := tr.Click("设置"); err != nil {
 		t.Fatalf("找不到设置按钮：%v", err)
 	}
 	if !a.settings {
-		t.Fatal("点了设置，面板没有打开")
+		t.Fatal("点了设置，页面没有换过去")
+	}
+	if !tr.HasText("帮助与关于") {
+		t.Errorf("标题里没有说明这是设置：%q", tr.Texts())
 	}
 	if !strings.Contains(a.help, "# mytools") {
 		t.Errorf("帮助里不是 readme 的内容：%d 个字符", len(a.help))
@@ -64,18 +67,44 @@ func TestSettings(t *testing.T) {
 	if !tr.HasText("MIT") || !tr.HasText("源码") {
 		t.Errorf("关于里没有许可以及源码：%q", tr.Texts())
 	}
-	// The panel is sized to the window, so that what is in it is in it at
-	// the smallest size the app allows as well.
-	for _, size := range [][2]int{{1000, 760}, {720, 520}} {
-		tr.SetSize(size[0], size[1])
-		tr.Frame()
-		done, ok := tr.Find("完成")
-		if !ok {
-			t.Fatalf("%dx%d：找不到完成按钮", size[0], size[1])
-		}
-		if done.Y+done.H > float32(size[1]) || done.Y < 0 {
-			t.Errorf("%dx%d：完成按钮在窗口外（y=%.0f，高 %.0f）", size[0], size[1], done.Y, done.H)
-		}
+	// The button leaves it as well, and the window is at the smallest size
+	// the app allows while it is up.
+	tr.SetSize(720, 520)
+	tr.Frame()
+	if err := tr.Click("回到工具"); err != nil {
+		t.Fatalf("找不到回到工具：%v", err)
+	}
+	if a.settings {
+		t.Error("「回到工具」没有离开设置")
+	}
+	// And picking a tool is leaving them: the page the sidebar names is
+	// what the window is for.
+	a.settings = true
+	tr.Frame()
+	if err := tr.Click("随机密码"); err != nil {
+		t.Fatal(err)
+	}
+	if a.settings || a.selected != "pw" {
+		t.Errorf("点侧边栏后 settings=%v，选中 %q", a.settings, a.selected)
+	}
+	if !tr.HasText("按字符集批量生成随机密码") {
+		t.Errorf("显示的不是随机密码页：%q", tr.Texts())
+	}
+	// A click on the tool already picked counts as well: the sidebar picks
+	// pages, and setting the same one again still shows it.
+	a.settings = true
+	tr.Frame()
+	if a.selected != a.picked {
+		t.Fatalf("这一条要先落在这个前提上：选中的就是已选中的那个（%q / %q）", a.selected, a.picked)
+	}
+	if err := tr.Click("随机密码"); err != nil {
+		t.Fatal(err)
+	}
+	if a.settings {
+		t.Error("点已经选中的那个工具，没有离开设置")
+	}
+	if !tr.HasText("按字符集批量生成随机密码") {
+		t.Errorf("没有回到随机密码页：%q", tr.Texts())
 	}
 }
 
