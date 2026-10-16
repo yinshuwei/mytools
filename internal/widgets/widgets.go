@@ -1,7 +1,12 @@
 // Package widgets holds the small pieces every tool of the toolbox shares.
 package widgets
 
-import "github.com/egoist/mygo/ui"
+import (
+	"fmt"
+	"unicode/utf8"
+
+	"github.com/egoist/mygo/ui"
+)
 
 // Caption is a small bold label above a control.
 func Caption(c *ui.Context, s string) ui.Element {
@@ -44,6 +49,28 @@ func CopyButton(c *ui.Context, label, s string) ui.Element {
 // Result shows a read-only, selectable text area bound to s.
 func Result(c *ui.Context, key any, label string, s *string, min, maxLines int) ui.Element {
 	return ui.TextArea(c.Key(key), s).Label(label).ReadOnly(true).Lines(min, maxLines).FillWidth()
+}
+
+// Elide cuts s down to limit characters for showing it, ending what is left
+// with an ellipsis and how much of s is not shown. Laying out a string of
+// megabytes every frame is what makes a view hang, and what does not fit on
+// screen is better copied or saved to a file than read.
+func Elide(s string, limit int) string {
+	total := utf8.RuneCountInString(s)
+	if total <= limit {
+		return s
+	}
+	// Cut on a rune boundary: the character at the edge may be several
+	// bytes long.
+	cut, n := len(s), 0
+	for i := range s {
+		if n == limit {
+			cut = i
+			break
+		}
+		n++
+	}
+	return fmt.Sprintf("%s…（共 %d 个字符，这里只显示前 %d 个）", s[:cut], total, limit)
 }
 
 // Drain moves everything a background goroutine sent, without blocking the

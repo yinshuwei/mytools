@@ -2,15 +2,20 @@ package tools
 
 import (
 	"bytes"
+	"encoding/base64"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
+	"math/rand"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
+
+	"gitee.com/yinshuwei/mytools/internal/widgets"
 )
 
 // TestJSONTree checks the parse, the output and the folding.
@@ -568,6 +573,70 @@ func whiteEdge(img image.Image) int {
 		}
 	}
 	return b.Dx()
+}
+
+// noisyPNG is a picture whose PNG is large enough that its Base64 is longer
+// than what the tool shows of it at once.
+func noisyPNG(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 96, 96))
+	rnd := rand.New(rand.NewSource(1))
+	for i := range img.Pix {
+		img.Pix[i] = uint8(rnd.Intn(256))
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// TestImage checks that a long Base64 is cut for showing while the whole of
+// it stays for copying and saving, and what a save is called by default.
+func TestImage(t *testing.T) {
+	data := noisyPNG(t)
+	im := &Image{}
+	im.apply(pick{path: "/pics/photo.png", data: data})
+	if im.err != "" {
+		t.Fatalf("读图失败：%s", im.err)
+	}
+	if im.bitmap == nil || im.skip != "" {
+		t.Errorf("这么小的图应当预览：bitmap=%v skip=%q", im.bitmap != nil, im.skip)
+	}
+	if want := base64.StdEncoding.EncodeToString(data); im.raw != want {
+		t.Error("Base64 不是这个文件的内容")
+	}
+	if !strings.HasPrefix(im.uri, "data:image/png;base64,") {
+		t.Errorf("Data URI 开头 = %q", im.uri[:30])
+	}
+	if len(im.raw) <= previewChars {
+		t.Fatalf("这张图的 Base64 只有 %d 个字符，测不出截断", len(im.raw))
+	}
+	// What is shown is the head of the text and how long it is; what is
+	// copied and saved is the whole of it.
+	if !strings.HasPrefix(im.short[0], im.raw[:previewChars]+"…") {
+		t.Errorf("显示的内容 = %.60q…", im.short[0])
+	}
+	if !strings.Contains(im.short[0], fmt.Sprintf("共 %d 个字符", len(im.raw))) {
+		t.Errorf("应当说明总长，得到 %.80q", im.short[0])
+	}
+	if strings.Contains(im.raw, "…") || strings.Contains(im.uri, "…") {
+		t.Error("留下来复制和保存的内容不该被截断")
+	}
+	if im.short[1] != widgets.Elide(im.uri, previewChars) {
+		t.Error("Data URI 的显示与纯 Base64 的那份不一样")
+	}
+	if got := im.saveName(); got != "photo.png.base64.txt" {
+		t.Errorf("默认文件名 = %q, want photo.png.base64.txt", got)
+	}
+	im.mode = 1
+	if got := im.saveName(); got != "photo.png.datauri.txt" {
+		t.Errorf("Data URI 的默认文件名 = %q", got)
+	}
+	im.clear()
+	if im.raw != "" || im.uri != "" || im.bitmap != nil || im.short != [2]string{} {
+		t.Error("清空后不该还留着内容")
+	}
 }
 
 // TestQR checks making a code, changing its size, reading it back, and

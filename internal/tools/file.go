@@ -39,10 +39,46 @@ func pickFile(win *mygo.Window, svc ui.Services, title string, filters []mygo.Fi
 	}()
 }
 
+// saved is what a background save dialog reports: where it wrote, or why it
+// could not. An empty path is a dialog the user closed.
+type saved struct {
+	path string
+	err  error
+}
+
+// saveFile asks where to put content, in the background, so that the window
+// keeps drawing, and writes it there; the frame that reads ch takes the
+// outcome, and is told to draw again either way.
+func saveFile(win *mygo.Window, svc ui.Services, title, name string, content string, ch chan<- saved) {
+	go func() {
+		defer svc.Invalidate()
+		path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+			Parent:      win,
+			Title:       title,
+			DefaultPath: name,
+			Filters:     textFilters,
+		})
+		switch {
+		case err != nil:
+			ch <- saved{err: err}
+		case path == "":
+			ch <- saved{}
+		default:
+			ch <- saved{path: path, err: os.WriteFile(path, []byte(content), 0o644)}
+		}
+	}()
+}
+
 // imageFilters limits a file dialog to images.
 var imageFilters = []mygo.FileFilter{{
 	Name:       "图片",
 	Extensions: []string{"png", "jpg", "jpeg", "gif", "webp", "bmp"},
+}}
+
+// textFilters limits a save dialog to text files.
+var textFilters = []mygo.FileFilter{{
+	Name:       "文本",
+	Extensions: []string{"txt"},
 }}
 
 // humanBytes formats a size for the eye.

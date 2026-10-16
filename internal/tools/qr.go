@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"image"
 	"image/color"
-	// The formats a code is read from, as ui.DecodeBitmap reads them.
-	_ "image/gif"
-	_ "image/jpeg"
 	"image/png"
 	"strconv"
 	"strings"
@@ -18,9 +15,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/makiuchi-d/gozxing"
 	"github.com/makiuchi-d/gozxing/qrcode"
-	_ "golang.org/x/image/bmp"
 	xdraw "golang.org/x/image/draw"
-	_ "golang.org/x/image/webp"
 
 	"gitee.com/yinshuwei/mytools/internal/widgets"
 )
