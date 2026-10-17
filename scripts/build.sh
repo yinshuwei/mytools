@@ -41,7 +41,8 @@ Options:
   -h, --help           this text
 
 Every target gets its own directory, OUT/<os>-<arch>/, holding the binary
-and the resources it reads, and, unless -n, is packed as
+and the resources it reads — on macOS a double-clickable <name>.app bundle
+instead of a bare executable — and, unless -n, is packed as
 OUT/<name>-<version>-<os>-<arch>.tar.gz.
 EOF
 }
@@ -134,6 +135,18 @@ for target in $platforms; do
 	dir=$out/$os-$arch
 	rm -rf "$dir"
 	mkdir -p "$dir"
+	exe=$dir/$bin
+
+	# Finder runs a bare executable in a Terminal window; only a bundle
+	# opens as an application. So on macOS the build goes into
+	# <name>.app/Contents/MacOS, and its resources into Contents/Resources,
+	# which is where MyGo looks for them there.
+	app=
+	if [ "$os" = darwin ]; then
+		app=$dir/$name.app
+		mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+		exe=$app/Contents/MacOS/$name
+	fi
 
 	ldflags="-X main.version=$version"
 	tags=
@@ -148,11 +161,68 @@ for target in $platforms; do
 
 	# shellcheck disable=SC2086 # $tags is a flag list, empty when debug.
 	GOOS=$os GOARCH=$arch CGO_ENABLED=0 \
-		go build -trimpath $tags -ldflags "$ldflags" -o "$dir/$bin" "$pkg"
+		go build -trimpath $tags -ldflags "$ldflags" -o "$exe" "$pkg"
 
-	# At run time MyGo reads resources next to the executable.
+	# At run time MyGo reads resources next to the executable, or from
+	# Contents/Resources in a bundle.
 	if [ -d resources ]; then
-		cp -R resources "$dir/"
+		if [ -n "$app" ]; then
+			cp -R resources/. "$app/Contents/Resources/"
+		else
+			cp -R resources "$dir/"
+		fi
+	fi
+
+	if [ -n "$app" ]; then
+		cat >"$app/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key><string>$name</string>
+	<key>CFBundleDisplayName</key><string>$name</string>
+	<key>CFBundleExecutable</key><string>$name</string>
+	<key>CFBundleIdentifier</key><string>com.yinshuwei.$name</string>
+	<key>CFBundleIconFile</key><string>AppIcon</string>
+	<key>CFBundleVersion</key><string>$version</string>
+	<key>CFBundleShortVersionString</key><string>$version</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+	<key>LSMinimumSystemVersion</key><string>12.0</string>
+	<key>NSHighResolutionCapable</key><true/>
+	<key>NSPrincipalClass</key><string>NSApplication</string>
+</dict>
+</plist>
+EOF
+		printf 'APPL????' >"$app/Contents/PkgInfo"
+
+		# The icon the bundle names, as an .icns. Both tools ship with
+		# macOS; a cross build on another system keeps icon.png and the
+		# default icon.
+		if [ -f resources/icon.png ] &&
+			command -v iconutil >/dev/null 2>&1 &&
+			command -v sips >/dev/null 2>&1; then
+			iconset=$(mktemp -d)/AppIcon.iconset
+			mkdir -p "$iconset"
+			for size in 16 32 128 256 512; do
+				dbl=$((size * 2))
+				sips -z "$size" "$size" resources/icon.png \
+					--out "$iconset/icon_${size}x${size}.png" >/dev/null
+				sips -z "$dbl" "$dbl" resources/icon.png \
+					--out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+			done
+			iconutil -c icns "$iconset" -o "$app/Contents/Resources/AppIcon.icns" ||
+				echo "build.sh: iconutil failed, keeping the default icon" >&2
+			rm -rf "$(dirname "$iconset")"
+		fi
+
+		# An ad hoc signature is what lets the bundle start on Apple
+		# silicon without a Developer ID. To ship it, sign with an
+		# identity instead (see `go tool mygo build -sign`).
+		if command -v codesign >/dev/null 2>&1; then
+			codesign --force --sign - "$app" >/dev/null 2>&1 ||
+				echo "build.sh: codesign failed, the bundle is unsigned" >&2
+		fi
 	fi
 
 	if [ "$archive" -eq 1 ]; then

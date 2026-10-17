@@ -31,10 +31,10 @@ scripts/build.sh -v 1.2.3        # 指定版本号（默认取 git 标签）
 | 目标 | 可执行文件 |
 | --- | --- |
 | `linux/amd64`、`linux/arm64` | `dist/linux-*/mytools` |
-| `darwin/amd64`、`darwin/arm64` | `dist/darwin-*/mytools` |
+| `darwin/amd64`、`darwin/arm64` | `dist/darwin-*/mytools.app` |
 | `windows/amd64`、`windows/arm64` | `dist/windows-*/mytools.exe` |
 
-每个目标各占一个 `dist/<os>-<arch>/`：可执行文件，以及运行时放在它旁边的 `resources/`；再打成 `dist/mytools-<版本>-<os>-<arch>.tar.gz`。默认是发布构建——`-trimpath`、`-ldflags "-s -w"`、`-tags mygo_noinspector`（去掉 MyGo 的界面检查器），Windows 目标另加 `-H=windowsgui`，免得弹出控制台；加 `-d` 就反过来，留着调试功能与符号。
+每个目标各占一个 `dist/<os>-<arch>/`：可执行文件，以及运行时放在它旁边的 `resources/`；再打成 `dist/mytools-<版本>-<os>-<arch>.tar.gz`。macOS 是个例外：那里双击裸的可执行文件只会让 Finder 开一个 Terminal 去跑它，所以这个目标是完整的 `mytools.app` 包（`Contents/MacOS/mytools` + `Contents/Resources` + `Info.plist`，在有 macOS 工具链的机器上还带图标与 ad hoc 签名），双击直接开窗口。默认是发布构建——`-trimpath`、`-ldflags "-s -w"`、`-tags mygo_noinspector`（去掉 MyGo 的界面检查器），Windows 目标另加 `-H=windowsgui`，免得弹出控制台；加 `-d` 就反过来，留着调试功能与符号。
 
 Windows 上是同一套参数，用 `scripts\build.cmd`（或直接 `scripts/build.ps1`），开关名对应为 `-Platform`、`-Version`、`-Local`、`-Debug`、`-NoArchive`。
 
