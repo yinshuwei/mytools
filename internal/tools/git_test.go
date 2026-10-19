@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -13,9 +14,9 @@ import (
 // file back afterwards.
 func rootsToTemp(t *testing.T) {
 	t.Helper()
-	old := gitRootsFile
-	gitRootsFile = filepath.Join(t.TempDir(), "git-roots.json")
-	t.Cleanup(func() { gitRootsFile = old })
+	old := gitConfigFile
+	gitConfigFile = filepath.Join(t.TempDir(), "git-roots.json")
+	t.Cleanup(func() { gitConfigFile = old })
 }
 
 // TestParseGitStatus reads what porcelain v2 says: the branch, what is
@@ -190,10 +191,10 @@ func TestGitRootsRemembered(t *testing.T) {
 	rootsToTemp(t)
 	dir := t.TempDir()
 	g := &Git{roots: []*gitRoot{{path: dir, collapsed: map[string]bool{}}}}
-	g.saveRoots()
+	g.saveConfig()
 
 	next := &Git{}
-	next.loadRoots()
+	next.loadConfig()
 	if len(next.roots) != 1 || next.roots[0].path != dir {
 		t.Fatalf("读回来的 roots = %+v", next.roots)
 	}
@@ -201,7 +202,7 @@ func TestGitRootsRemembered(t *testing.T) {
 		t.Error("折叠状态没有初始化")
 	}
 	// Reading again adds nothing, as the window is given once.
-	next.loadRoots()
+	next.loadConfig()
 	if len(next.roots) != 1 {
 		t.Errorf("再读一次 = %d 个 root", len(next.roots))
 	}
@@ -217,13 +218,76 @@ func TestGitRootsGoneDropped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(gitRootsFile, data, 0o644); err != nil {
+	if err := os.WriteFile(gitConfigFile, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	g := &Git{}
-	g.loadRoots()
+	g.loadConfig()
 	if len(g.roots) != 1 || g.roots[0].path != dir {
 		t.Fatalf("读回来的 roots = %+v，want 只剩 %q", g.roots, dir)
+	}
+}
+
+// TestGitEditor checks that the button names the editor the machine has,
+// that a machine with more than one opens a menu of them, and that the one
+// chosen is remembered.
+func TestGitEditor(t *testing.T) {
+	rootsToTemp(t)
+	old := availableEditors
+	defer func() { availableEditors = old }()
+
+	var opened string
+	availableEditors = func() []gitEditor {
+		return []gitEditor{
+			{Name: "VS Code", open: func(dir string) error { opened = "code:" + dir; return nil }},
+			{Name: "VSCodium", open: func(dir string) error { opened = "codium:" + dir; return nil }},
+		}
+	}
+
+	g := &Git{}
+	if ed := g.editor(); ed == nil || ed.Name != "VS Code" {
+		t.Fatalf("默认编辑器 = %+v，want VS Code", ed)
+	}
+
+	// A repository of its own, so that the row and its buttons show.
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	g.roots = []*gitRoot{{
+		path: dir, collapsed: map[string]bool{}, scanned: time.Now(),
+		repos: []*gitRepo{{path: repo, rel: "repo", name: "repo"}},
+	}}
+	tr := ui.NewTester(g.View, 900, 600)
+	tr.Frame()
+	// The button names the first editor; with two installed it opens a menu.
+	if err := tr.Click("在 VS Code 中打开（点开可以换编辑器）"); err != nil {
+		t.Fatal(err)
+	}
+	menu := tr.Menu()
+	if len(menu) != 2 || menu[0] != "VS Code" || menu[1] != "VSCodium" {
+		t.Fatalf("菜单 = %v，want [VS Code VSCodium]", menu)
+	}
+	if err := tr.ChooseMenuItem("VSCodium"); err != nil {
+		t.Fatalf("菜单里没有 VSCodium：%v", err)
+	}
+	if opened != "codium:"+repo {
+		t.Errorf("打开的是 %q，want codium:%s", opened, repo)
+	}
+	if g.editorName != "VSCodium" {
+		t.Errorf("记住的编辑器 = %q，want VSCodium", g.editorName)
+	}
+	next := &Git{}
+	next.loadConfig()
+	if next.editorName != "VSCodium" {
+		t.Errorf("下次启动的编辑器 = %q，want VSCodium", next.editorName)
+	}
+
+	// A machine without one has no editor to name.
+	availableEditors = func() []gitEditor { return nil }
+	if ed := (&Git{}).editor(); ed != nil {
+		t.Errorf("没有编辑器却选出了 %q", ed.Name)
 	}
 }
 
@@ -251,7 +315,7 @@ func TestGitCloseTab(t *testing.T) {
 		t.Errorf("当前标签 = %d，want 0（还是 b）", g.tab)
 	}
 	next := &Git{}
-	next.loadRoots()
+	next.loadConfig()
 	if len(next.roots) != 1 || next.roots[0].path != b {
 		t.Errorf("下次启动的 roots = %+v，want [%q]", next.roots, b)
 	}

@@ -23,13 +23,17 @@ const (
 
 // Git lists the git repositories under the folders one adds, each with what
 // it has to be committed, pulled or pushed, and opens one where it is worked
-// on: a terminal, the file manager or VS Code.
+// on: a terminal, the file manager, or an editor the machine has.
 type Git struct {
 	win *mygo.Window
 	svc ui.Services
 
 	roots []*gitRoot // one per tab, in the order they were added
 	tab   int        // the tab shown
+
+	// editorName is the editor chosen last run, as the button that opens a
+	// repository names it; empty takes the first editor the machine has.
+	editorName string
 
 	picking bool
 	picks   chan gitPicked
@@ -110,7 +114,7 @@ func (*Git) FillsHeight() bool { return true }
 // program is the point at which the page is really shown.
 func (g *Git) SetWindow(win *mygo.Window) {
 	g.win = win
-	g.loadRoots()
+	g.loadConfig()
 }
 
 // root returns the tab of a path, or nil when the root is gone.
@@ -182,7 +186,7 @@ func (g *Git) addRoot(c *ui.Context, p gitPicked) {
 		r := &gitRoot{path: p.path, collapsed: map[string]bool{}}
 		g.roots = append(g.roots, r)
 		g.tab = len(g.roots) - 1
-		g.saveRoots()
+		g.saveConfig()
 		g.scan(r)
 	}
 }
@@ -203,7 +207,7 @@ func (g *Git) removeRoot(i int) {
 	if g.tab < 0 {
 		g.tab = 0
 	}
-	g.saveRoots()
+	g.saveConfig()
 }
 
 // scan finds the repositories under a root again, in the background.
@@ -674,12 +678,58 @@ func (g *Git) repoActions(c *ui.Context, t *ui.Theme, r *gitRoot, rp *gitRepo) {
 	if iconAction(c, "files", "在文件管理器中打开", icoGitFolder, !busy) {
 		g.open(c, rp, "files")
 	}
-	if iconAction(c, "code", "在 VS Code 中打开", icoCode, !busy) {
-		g.open(c, rp, "vscode")
-	}
+	g.editorActions(c, rp, busy)
 	if iconAction(c, "refresh", "刷新状态（git status）", icoRefresh, !busy) {
 		g.refresh(r, rp)
 	}
+}
+
+// editorActions is the button that opens the repository in an editor. With
+// more than one editor installed it opens a menu of them, and remembers the
+// one chosen for the next run.
+func (g *Git) editorActions(c *ui.Context, rp *gitRepo, busy bool) {
+	eds := availableEditors()
+	cur := g.editor()
+	if cur == nil {
+		iconButton(c, "editor", "没有找到常用编辑器", icoCode, false)
+		return
+	}
+	tip := "在 " + cur.Name + " 中打开"
+	if len(eds) > 1 {
+		tip += "（点开可以换编辑器）"
+	}
+	b := iconButton(c, "editor", tip, icoCode, !busy)
+	if busy {
+		return
+	}
+	if len(eds) == 1 {
+		if b.Clicked() {
+			g.openWith(c, rp, *cur)
+		}
+		return
+	}
+	b.Menu(func(m *ui.Menu) {
+		for i := range eds {
+			ed := eds[i]
+			item := m.Item(ed.Name)
+			if ed.Name == cur.Name {
+				item.Checked(true)
+			}
+			if item.Chosen() {
+				g.useEditor(ed)
+				g.openWith(c, rp, ed)
+			}
+		}
+	})
+}
+
+// openWith opens a repository in one editor.
+func (g *Git) openWith(c *ui.Context, rp *gitRepo, ed gitEditor) {
+	if err := ed.open(rp.path); err != nil {
+		c.Toast("打开失败：" + err.Error())
+		return
+	}
+	c.Toast("已在 " + ed.Name + " 中打开 " + rp.name)
 }
 
 // open opens a repository the way asked, saying so when it could not.
@@ -693,14 +743,11 @@ func (g *Git) open(c *ui.Context, rp *gitRepo, how string) {
 		c.Toast("已在终端中打开 " + rp.name)
 	case "files":
 		c.Toast("已在文件管理器中打开 " + rp.name)
-	case "vscode":
-		c.Toast("已在 VS Code 中打开 " + rp.name)
 	}
 }
 
-// iconAction is a button with only an icon, named for what it does. It
-// reports a click, which a disabled button does not make.
-func iconAction(c *ui.Context, key any, tip string, ico *ui.SVG, on bool) bool {
+// iconButton is a button with only an icon, named for what it does.
+func iconButton(c *ui.Context, key any, tip string, ico *ui.SVG, on bool) ui.Element {
 	t := c.Theme()
 	b := ui.ButtonBase(c.Key(key)).Size(22, 22).Radius(4).Label(tip).Tooltip(tip).Disabled(!on)
 	if on && b.Hovered() {
@@ -713,6 +760,12 @@ func iconAction(c *ui.Context, key any, tip string, ico *ui.SVG, on bool) bool {
 		}
 		ui.Icon(c, ico).FontSize(14).TextColor(col)
 	})
+	return b
+}
+
+// iconAction is iconButton, clicked: a disabled button reports no click.
+func iconAction(c *ui.Context, key any, tip string, ico *ui.SVG, on bool) bool {
+	b := iconButton(c, key, tip, ico, on)
 	return on && b.Clicked()
 }
 

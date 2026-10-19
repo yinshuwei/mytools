@@ -6,16 +6,15 @@ import (
 	"runtime"
 )
 
-// openIn opens dir the way ask says: "terminal", "files" for the file
-// manager, or "vscode".
+// openIn opens dir the way ask says: "terminal", or "files" for the file
+// manager. The editor a repository opens in is the one the machine has,
+// which the page finds for itself.
 func openIn(dir, ask string) error {
 	switch ask {
 	case "terminal":
 		return launchTerminal(dir)
 	case "files":
 		return launchFiles(dir)
-	case "vscode":
-		return launchVSCode(dir)
 	}
 	return errors.New("未知的打开方式：" + ask)
 }
@@ -75,18 +74,4 @@ func launchFiles(dir string) error {
 		return startDetached("explorer", dir)
 	}
 	return startDetached("xdg-open", dir)
-}
-
-// launchVSCode opens dir in VS Code, through its shell command or, on a
-// Mac, through the application itself.
-func launchVSCode(dir string) error {
-	for _, name := range []string{"code", "code-insiders"} {
-		if p, err := exec.LookPath(name); err == nil {
-			return startDetached(p, dir)
-		}
-	}
-	if runtime.GOOS == "darwin" {
-		return startDetached("open", "-a", "Visual Studio Code", dir)
-	}
-	return errors.New("没有找到 code 命令：在 VS Code 里装上 shell command，或把 code 放进 PATH")
 }

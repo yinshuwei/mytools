@@ -7,18 +7,20 @@ import (
 )
 
 // gitConfig is what the Git page remembers between runs: the roots it had
-// open.
+// open, and the editor it opened them in.
 type gitConfig struct {
-	Roots []string `json:"roots"`
+	Roots  []string `json:"roots"`
+	Editor string   `json:"editor,omitempty"`
 }
 
-// gitRootsFile is where the roots are kept, in the user's configuration
-// directory. It is a variable so that tests keep their roots to themselves.
-var gitRootsFile = defaultGitRootsFile()
+// gitConfigFile is where this is kept, in the user's configuration
+// directory. It is a variable so that tests keep their settings to
+// themselves.
+var gitConfigFile = defaultGitConfigFile()
 
-// defaultGitRootsFile is the file the roots are kept in: beside the other
-// settings of the toolbox, in the desktop's configuration directory.
-func defaultGitRootsFile() string {
+// defaultGitConfigFile is the file the settings are kept in: beside the
+// other settings of the toolbox, in the desktop's configuration directory.
+func defaultGitConfigFile() string {
 	dir, err := os.UserConfigDir()
 	if err != nil || dir == "" {
 		return ""
@@ -26,14 +28,14 @@ func defaultGitRootsFile() string {
 	return filepath.Join(dir, "mytools", "git-roots.json")
 }
 
-// loadRoots reads the roots the last run had open. A root that is no longer
-// a directory, and a file that does not read, are left out rather than
-// reported: the page is usable without either.
-func (g *Git) loadRoots() {
-	if gitRootsFile == "" || len(g.roots) > 0 {
+// loadConfig reads the roots and the editor of the last run. A root that is
+// no longer a directory, and a file that does not read, are left out rather
+// than reported: the page is usable without either.
+func (g *Git) loadConfig() {
+	if gitConfigFile == "" || len(g.roots) > 0 {
 		return
 	}
-	data, err := os.ReadFile(gitRootsFile)
+	data, err := os.ReadFile(gitConfigFile)
 	if err != nil {
 		return
 	}
@@ -41,6 +43,7 @@ func (g *Git) loadRoots() {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return
 	}
+	g.editorName = cfg.Editor
 	for _, p := range cfg.Roots {
 		if p == "" {
 			continue
@@ -54,14 +57,14 @@ func (g *Git) loadRoots() {
 	}
 }
 
-// saveRoots writes the roots now open, for the next run. It is written
-// beside the file and renamed into place, so that a crash while writing
-// cannot leave a half file the next run cannot read.
-func (g *Git) saveRoots() {
-	if gitRootsFile == "" {
+// saveConfig writes the roots and the editor now in use, for the next run.
+// It is written beside the file and renamed into place, so that a crash
+// while writing cannot leave a half file the next run cannot read.
+func (g *Git) saveConfig() {
+	if gitConfigFile == "" {
 		return
 	}
-	cfg := gitConfig{Roots: make([]string, 0, len(g.roots))}
+	cfg := gitConfig{Roots: make([]string, 0, len(g.roots)), Editor: g.editorName}
 	for _, r := range g.roots {
 		cfg.Roots = append(cfg.Roots, r.path)
 	}
@@ -69,12 +72,12 @@ func (g *Git) saveRoots() {
 	if err != nil {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(gitRootsFile), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(gitConfigFile), 0o755); err != nil {
 		return
 	}
-	tmp := gitRootsFile + ".tmp"
+	tmp := gitConfigFile + ".tmp"
 	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
 		return
 	}
-	_ = os.Rename(tmp, gitRootsFile)
+	_ = os.Rename(tmp, gitConfigFile)
 }
