@@ -1,10 +1,12 @@
 package app
 
 import (
+	"encoding/base64"
 	"fmt"
 	stdhtml "html"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -19,10 +21,11 @@ import (
 // text it is: for a machine where the web engine cannot draw at all.
 var helpAsText = os.Getenv("MYTOOLS_NO_WEBVIEW") != ""
 
-// helpBase is what the readme's relative links resolve against: the source
-// tree, when the program runs from it, so that the screenshots it shows are
-// there to be shown. A built binary run from anywhere else has none, and
-// the readme shows as text is enough there.
+// helpBase is what the readme's remaining relative links resolve against:
+// the source tree, when the program runs from it, so that a link to a file
+// of the repository — the license, above all — opens it. A built binary run
+// from anywhere else resolves them against nothing, which is why the
+// screenshots the readme shows are inlined rather than left to the disk.
 func helpBase() string {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -34,6 +37,25 @@ func helpBase() string {
 	return "file://" + wd + "/"
 }
 
+// shotLink is a screenshot of the readme, as its markdown links to one.
+var shotLink = regexp.MustCompile(`\(docs/[\w.-]+\.png\)`)
+
+// readme is the readme as the Help page renders it, with the screenshots it
+// shows inlined as data URIs. They are read back out of the binary, so that
+// the page shows its pictures wherever the program is run from — and without
+// the web view reaching for the disk at all. A link to something that is not
+// among them is left as it is, to be seen for what it is.
+func readme() string {
+	return shotLink.ReplaceAllStringFunc(mytools.Readme, func(link string) string {
+		name := strings.TrimSuffix(strings.TrimPrefix(link, "(docs/"), ")")
+		data, err := mytools.Shots.ReadFile("docs/" + name)
+		if err != nil {
+			return link
+		}
+		return "(data:image/png;base64," + base64.StdEncoding.EncodeToString(data) + ")"
+	})
+}
+
 // markdown renders the readme. The extensions are GitHub's, which is what
 // the readme is written in: tables above all, and autolinks.
 var markdown = goldmark.New(goldmark.WithExtensions(extension.GFM))
@@ -41,10 +63,11 @@ var markdown = goldmark.New(goldmark.WithExtensions(extension.GFM))
 // helpBody is the readme as HTML, rendered once: only the page around it
 // changes with the window's colors.
 var helpBody = sync.OnceValue(func() string {
+	src := readme()
 	var b strings.Builder
-	if err := markdown.Convert([]byte(mytools.Readme), &b); err != nil {
+	if err := markdown.Convert([]byte(src), &b); err != nil {
 		// Markdown that will not render is still worth reading.
-		return "<pre>" + stdhtml.EscapeString(mytools.Readme) + "</pre>"
+		return "<pre>" + stdhtml.EscapeString(src) + "</pre>"
 	}
 	return b.String()
 })

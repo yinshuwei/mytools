@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+
+	mytools "gitee.com/yinshuwei/mytools"
 )
 
 // darkTheme is a theme to dress a page in, standing for a window's.
@@ -33,14 +35,49 @@ func TestHelpDocument(t *testing.T) {
 		"color-scheme:dark",
 		"--bg:#1e1e1e",
 		"--accent:#4c8dff",
+		// The screenshots are carried in the binary and inlined, so that the
+		// page shows them wherever the program is run from.
+		`<img src="data:image/png;base64,`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("页面里没有 %q", want)
 		}
 	}
+	for _, unwanted := range []string{
+		`src="docs/`, // a screenshot left to the disk is one that may not be there
+	} {
+		if strings.Contains(page, unwanted) {
+			t.Errorf("页面里有 %q，截图应当已经内联", unwanted)
+		}
+	}
+	// Every screenshot the readme shows is one the binary carries.
+	if got, want := strings.Count(page, `<img src="data:image/png;base64,`),
+		strings.Count(mytools.Readme, "](docs/"); got != want {
+		t.Errorf("内联了 %d 张截图，readme 里有 %d 张", got, want)
+	}
 	light := &ui.Theme{Background: ui.Hex("#ffffff"), Text: ui.Hex("#111111")}
 	if got := helpStyle(light); !strings.Contains(got, "color-scheme:light") {
 		t.Errorf("浅色主题 = %q", got)
+	}
+}
+
+// TestHelpCarriesShots checks that the Help page shows the readme's
+// screenshots from anywhere: they travel in the binary, so a run outside the
+// source tree — a built binary in a directory of its own, with no docs/ to
+// resolve against — shows them just the same.
+func TestHelpCarriesShots(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if base := helpBase(); base != "" {
+		t.Fatalf("源码树之外还解析出了 base：%q", base)
+	}
+	page := helpDocument(helpStyle(darkTheme))
+	got, want := strings.Count(page, `<img src="data:image/png;base64,`),
+		strings.Count(mytools.Readme, "](docs/")
+	if want == 0 {
+		t.Fatal("readme 里没有截图")
+	}
+	if got != want {
+		t.Errorf("内联了 %d 张截图，readme 里有 %d 张", got, want)
 	}
 }
 
