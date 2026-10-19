@@ -105,6 +105,10 @@ func (*Git) Desc() string {
 	return "扫描多个 Root 下所有的 git 代码库，看状态、拉取、推送与打开"
 }
 
+// MaxWidth keeps the list of repositories from stretching across a wide
+// window, where the buttons at its right sit far from the names.
+func (*Git) MaxWidth() float32 { return PageWidth }
+
 // FillsHeight takes the whole content area: the list of repositories scrolls
 // by itself, under the controls that do not.
 func (*Git) FillsHeight() bool { return true }

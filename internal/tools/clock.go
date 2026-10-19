@@ -28,6 +28,9 @@ func (*Clock) ID() string   { return "clock" }
 func (*Clock) Name() string { return "时间戳" }
 func (*Clock) Desc() string { return "时间戳与日期时间互转，可切换时区" }
 
+// MaxWidth keeps the clocks and the boxes of the conversion in a column.
+func (*Clock) MaxWidth() float32 { return PageWidth }
+
 // localZone is the choice meaning the system's own zone, and customZone the
 // one that takes a zone typed in.
 const (

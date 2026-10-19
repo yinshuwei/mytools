@@ -78,6 +78,9 @@ func (*Image) ID() string   { return "img" }
 func (*Image) Name() string { return "图片转 Base64" }
 func (*Image) Desc() string { return "图片编码成 Base64 / Data URI，也能读回图片" }
 
+// MaxWidth keeps the picture and the text it is encoded as in a column.
+func (*Image) MaxWidth() float32 { return PageWidth }
+
 // SetWindow is what WindowAware asks of a tool acting on the window.
 func (im *Image) SetWindow(win *mygo.Window) { im.win = win }
 

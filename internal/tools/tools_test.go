@@ -1132,3 +1132,21 @@ func TestQR(t *testing.T) {
 		t.Error("清空内容后不应还留着二维码")
 	}
 }
+
+// TestPageWidths checks which pages ask for a width of their own: the pages
+// of controls, and not the one of a tree, which takes the whole content
+// area however wide.
+func TestPageWidths(t *testing.T) {
+	for _, tl := range All() {
+		_, capped := tl.(MaxWidth)
+		if tl.ID() == "json" {
+			if capped {
+				t.Error("JSON 美化要整幅宽度，不该限制")
+			}
+			continue
+		}
+		if !capped {
+			t.Errorf("%s 没有限制页面宽度", tl.ID())
+		}
+	}
+}

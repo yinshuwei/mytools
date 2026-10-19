@@ -29,6 +29,18 @@ type FillsHeight interface {
 	FillsHeight() bool
 }
 
+// PageWidth is the width a page of controls is laid out in at most. A page
+// of a tree, as JSON 美化 is, asks for no such thing: it takes the whole
+// content area, however wide.
+const PageWidth float32 = 1000
+
+// A MaxWidth tool asks for a page no wider than the DIPs it names, at the
+// left of the content area: stretched across a very wide window, the buttons
+// at its right are a journey from what they act on.
+type MaxWidth interface {
+	MaxWidth() float32
+}
+
 // All returns the tools of the toolbox, in the order of the sidebar.
 func All() []Tool {
 	return []Tool{

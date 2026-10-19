@@ -51,6 +51,9 @@ func (*QR) ID() string   { return "qr" }
 func (*QR) Name() string { return "二维码" }
 func (*QR) Desc() string { return "生成二维码（可带 Logo）、从图片里读二维码" }
 
+// MaxWidth keeps the code and the controls that shape it in a column.
+func (*QR) MaxWidth() float32 { return PageWidth }
+
 // SetWindow is what WindowAware asks of a tool acting on the window.
 func (q *QR) SetWindow(win *mygo.Window) { q.win = win }
 

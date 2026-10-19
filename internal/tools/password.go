@@ -31,6 +31,9 @@ func (*Password) ID() string   { return "pw" }
 func (*Password) Name() string { return "随机密码" }
 func (*Password) Desc() string { return "按字符集批量生成随机密码" }
 
+// MaxWidth keeps the choices and the list of passwords in a column.
+func (*Password) MaxWidth() float32 { return PageWidth }
+
 // The character sets a password is drawn from.
 const (
 	upperChars  = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"

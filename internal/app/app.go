@@ -195,16 +195,27 @@ func (a *App) page(c *ui.Context, t *ui.Theme) {
 		return
 	}
 	cur := a.current()
+	// A page of controls asks for a width of its own: stretched across a
+	// very wide window, the buttons at its right are a journey from what
+	// they act on. It stays at the left, under the heading.
+	maxWidth := float32(0)
+	if mw, ok := cur.(tools.MaxWidth); ok {
+		maxWidth = mw.MaxWidth()
+	}
 	if fh, ok := cur.(tools.FillsHeight); ok && fh.FillsHeight() {
-		ui.Column(c).Grow(1).FillWidth().Padding(16, 20).Children(func() {
-			cur.View(c)
-		})
+		page := ui.Column(c).Grow(1).FillWidth().Padding(16, 20)
+		if maxWidth > 0 {
+			page.MaxWidth(maxWidth)
+		}
+		page.Children(func() { cur.View(c) })
 		return
 	}
 	ui.Scroll(c).Grow(1).FillWidth().Children(func() {
-		ui.Column(c).Padding(16, 20, 24, 20).Gap(14).FillWidth().Children(func() {
-			cur.View(c)
-		})
+		page := ui.Column(c).Padding(16, 20, 24, 20).Gap(14).FillWidth()
+		if maxWidth > 0 {
+			page.MaxWidth(maxWidth)
+		}
+		page.Children(func() { cur.View(c) })
 	})
 }
 

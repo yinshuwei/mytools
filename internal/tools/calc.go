@@ -42,6 +42,9 @@ func (*Calc) ID() string   { return "calc" }
 func (*Calc) Name() string { return "计算器" }
 func (*Calc) Desc() string { return "输入算式即出结果，连进制一起给，历史可回填" }
 
+// MaxWidth keeps the calculator, its history included, in a column.
+func (*Calc) MaxWidth() float32 { return PageWidth }
+
 // FillsHeight takes the whole content area: the history fills what the box
 // and the result leave, and scrolls by itself.
 func (*Calc) FillsHeight() bool { return true }

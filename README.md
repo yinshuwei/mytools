@@ -116,12 +116,14 @@ scripts/              跨平台编译脚本（build.sh / build.ps1 / build.cmd�
 新增一个工具：在 `internal/tools` 里加一个文件，写一个类型实现 `tools.Tool`
 （`ID`、`Name`、`Desc`、`View`），再把它加进 `tools.All()`。
 
-按需再实现两个可选接口：
+按需再实现三个可选接口：
 
 - `tools.WindowAware`：需要窗口的工具（例如弹原生文件对话框），
   `App.SetWindow` 会在窗口创建后自动注入；
 - `tools.FillsHeight`：自己分栏、自己滚动的页面（如 JSON 美化），
-  外壳会把整个内容区交给它，而不是当成一列来滚动。
+  外壳会把整个内容区交给它，而不是当成一列来滚动；
+- `tools.MaxWidth`：页面最宽 `tools.PageWidth`（1000 DIP）、靠左，窗口很宽时按钮不会离内容太远；
+  JSON 美化不实现它，保留整幅宽度。
 
 按钮上挂快捷键用 `internal/tools/keys.go` 里的 `mainPressed`（主按钮，
 含 `Cmd+Enter`）和 `filePressed`（文件对话框按钮，含 `Cmd+O`），
