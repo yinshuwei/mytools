@@ -112,7 +112,7 @@ func (cd *Codec) View(c *ui.Context) {
 		widgets.CopyButton(c.Key("copyin"), "复制输入", cd.input)
 	})
 	if cd.err != "" {
-		ui.Text(c, "错误："+cd.err).FontSize(12).TextColor(t.Danger)
+		ui.Text(c, "错误："+cd.err).FontSize(widgets.Scaled(12)).TextColor(t.Danger)
 	}
 	// Keyed: the line reporting an error comes and goes above it.
 	widgets.FieldKey(c, "outfield", "结果", func() {

@@ -268,7 +268,7 @@ func (q *QR) makeView(c *ui.Context, t *ui.Theme) {
 		ui.Select(c.Key("level"), &q.level, levels).Width(80)
 		widgets.Hint(c, "尺寸")
 		ui.Slider(c.Key("size"), &q.size, 120, 1000).Step(10).Width(160)
-		ui.Textf(c, "%.0f px", q.size).FontSize(12).TextColor(t.TextMuted)
+		ui.Textf(c, "%.0f px", q.size).FontSize(widgets.Scaled(12)).TextColor(t.TextMuted)
 		ui.Spacer(c)
 		logo := ui.Button(c.Key("logo"), "选择 Logo…").
 			Tooltip("在二维码中间放一张图片（" + widgets.ShortcutHint(0, "O") + "）")
@@ -289,10 +289,10 @@ func (q *QR) makeView(c *ui.Context, t *ui.Theme) {
 			FontSize(12).TextColor(t.Warning)
 	}
 	if q.logoErr != "" {
-		ui.Text(c, "Logo 错误："+q.logoErr).FontSize(12).TextColor(t.Danger)
+		ui.Text(c, "Logo 错误："+q.logoErr).FontSize(widgets.Scaled(12)).TextColor(t.Danger)
 	}
 	if q.err != "" {
-		ui.Text(c, "错误："+q.err).FontSize(12).TextColor(t.Danger)
+		ui.Text(c, "错误："+q.err).FontSize(widgets.Scaled(12)).TextColor(t.Danger)
 	}
 	ui.Column(c).PaddingY(8).Center().FillWidth().Children(func() {
 		if q.code != nil {
@@ -331,7 +331,7 @@ func (q *QR) readView(c *ui.Context, t *ui.Theme) {
 		widgets.Hint(c, "支持 PNG / JPEG / GIF / WebP / BMP")
 	})
 	if q.decodeErr != "" {
-		ui.Text(c, "错误："+q.decodeErr).FontSize(12).TextColor(t.Danger)
+		ui.Text(c, "错误："+q.decodeErr).FontSize(widgets.Scaled(12)).TextColor(t.Danger)
 	}
 	// Keyed: the line reporting an error comes and goes above it.
 	widgets.FieldKey(c, "decodedfield", "读出的内容", func() {

@@ -15,6 +15,7 @@ import (
 	"github.com/yuin/goldmark/extension"
 
 	mytools "gitee.com/yinshuwei/mytools"
+	"gitee.com/yinshuwei/mytools/internal/widgets"
 )
 
 // helpAsText is set by MYTOOLS_NO_WEBVIEW, which asks for the readme as the
@@ -95,9 +96,9 @@ func helpStyle(t *ui.Theme) string {
 	if t.Dark {
 		scheme = "dark"
 	}
-	return fmt.Sprintf(":root{color-scheme:%s;--bg:%s;--surface:%s;--text:%s;--muted:%s;"+
+	return fmt.Sprintf(":root{color-scheme:%s;--zoom:%g;--bg:%s;--surface:%s;--text:%s;--muted:%s;"+
 		"--border:%s;--accent:%s;--on-accent:%s}",
-		scheme, cssColor(t.Background), cssColor(t.Surface), cssColor(t.Text),
+		scheme, widgets.Zoom(), cssColor(t.Background), cssColor(t.Surface), cssColor(t.Text),
 		cssColor(t.TextMuted), cssColor(t.Border), cssColor(t.Accent), cssColor(t.AccentText))
 }
 
@@ -118,6 +119,7 @@ body{
 	font:14px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",
 		"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
 	-webkit-font-smoothing:antialiased;
+	zoom:var(--zoom,1);
 }
 h1,h2,h3,h4{line-height:1.3;margin:1.6em 0 .6em;font-weight:600}
 h1{font-size:23px;margin-top:0}

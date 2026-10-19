@@ -180,7 +180,7 @@ func (p *Password) View(c *ui.Context) {
 		}
 		widgets.CopyButton(c.Key("copyall"), "复制全部", p.text)
 		if len(p.pws) > 0 {
-			ui.Textf(c, "共 %d 条", len(p.pws)).FontSize(12).TextColor(t.TextMuted)
+			ui.Textf(c, "共 %d 条", len(p.pws)).FontSize(widgets.Scaled(12)).TextColor(t.TextMuted)
 		}
 		ui.Spacer(c)
 		if ui.Button(c.Key("clear"), "清空").Disabled(len(p.pws) == 0).Clicked() {
@@ -188,7 +188,7 @@ func (p *Password) View(c *ui.Context) {
 		}
 	})
 	if p.err != "" {
-		ui.Text(c, "错误："+p.err).FontSize(12).TextColor(t.Danger)
+		ui.Text(c, "错误："+p.err).FontSize(widgets.Scaled(12)).TextColor(t.Danger)
 	}
 
 	// Keyed: the line reporting an error comes and goes above it.

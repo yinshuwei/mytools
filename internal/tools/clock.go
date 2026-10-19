@@ -177,12 +177,12 @@ func (cl *Clock) View(c *ui.Context) {
 		widgets.Hint(c, zoneLabel(loc))
 	})
 	if zoneErr != nil {
-		ui.Text(c, "错误："+zoneErr.Error()).FontSize(12).TextColor(t.Danger)
+		ui.Text(c, "错误："+zoneErr.Error()).FontSize(widgets.Scaled(12)).TextColor(t.Danger)
 	}
 
 	widgets.Field(c, "现在", func() {
 		ui.Column(c).Gap(2).Children(func() {
-			ui.Text(c, now.Format("2006-01-02 15:04:05")).FontSize(24).Bold()
+			ui.Text(c, now.Format("2006-01-02 15:04:05")).FontSize(widgets.Scaled(24)).Bold()
 			widgets.Hint(c, now.Format("2006-01-02 15:04:05.000 MST")+"　"+now.Format("Mon Jan 2"))
 		})
 	})
@@ -216,7 +216,7 @@ func (cl *Clock) View(c *ui.Context) {
 				widgets.Hint(c, l.Format("2006-01-02 15:04:05.000 MST")+"　"+l.Format("-07:00"))
 			})
 		} else {
-			ui.Text(c, "错误：需要一个整数时间戳").FontSize(12).TextColor(t.Danger)
+			ui.Text(c, "错误：需要一个整数时间戳").FontSize(widgets.Scaled(12)).TextColor(t.Danger)
 		}
 	}
 
@@ -242,7 +242,7 @@ func (cl *Clock) View(c *ui.Context) {
 				widgets.CopyButton(c.Key("cpms"), "复制毫秒", strconv.FormatInt(tt.UnixMilli(), 10))
 			})
 		} else {
-			ui.Text(c, "错误：无法解析，试试 2006-01-02 15:04:05").FontSize(12).TextColor(t.Danger)
+			ui.Text(c, "错误：无法解析，试试 2006-01-02 15:04:05").FontSize(widgets.Scaled(12)).TextColor(t.Danger)
 		}
 	}
 }

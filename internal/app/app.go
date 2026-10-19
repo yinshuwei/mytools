@@ -4,6 +4,8 @@ package app
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"runtime/debug"
 
 	"github.com/egoist/mygo"
@@ -22,8 +24,13 @@ type App struct {
 	win      *mygo.Window
 	picked   string // the tool the sidebar had last, to tell a pick from a redraw
 	settings bool   // the settings page is the one shown
-	panel    int    // 0 帮助, 1 关于
+	panel    int    // 0 外观, 1 帮助, 2 关于
 	help     string // the readme, carried in the binary
+
+	// themeMode is "light", "dark" or "system", and zoom how much larger
+	// than usual the pages are drawn: the appearance the user chose.
+	themeMode string
+	zoom      float64
 
 	// helpWeb is the page the help panel shows the readme in, made the
 	// first time it is asked for rather than at startup: a web view is a
@@ -46,16 +53,23 @@ type helpStart struct {
 
 // New makes the toolbox with every tool.
 func New() *App {
-	a := &App{tools: tools.All(), help: mytools.Readme, helpMade: make(chan helpStart, 1)}
+	a := &App{
+		tools:     tools.All(),
+		help:      mytools.Readme,
+		helpMade:  make(chan helpStart, 1),
+		themeMode: "system",
+		zoom:      1,
+	}
 	a.selected = a.tools[0].ID()
 	a.picked = a.selected
 	return a
 }
 
 // SetWindow gives the window to the app itself and to the tools that act on
-// it.
+// it, and takes the appearance the last run left.
 func (a *App) SetWindow(win *mygo.Window) {
 	a.win = win
+	a.loadSettings()
 	for _, t := range a.tools {
 		if w, ok := t.(tools.WindowAware); ok {
 			w.SetWindow(win)
@@ -73,11 +87,42 @@ func (a *App) current() tools.Tool {
 	return a.tools[0]
 }
 
+// applyAppearance dresses the frame the way the user chose: the colors, and
+// the zoom over them. It runs before anything is built, as SetTheme only
+// reaches the widgets made after it.
+func (a *App) applyAppearance(c *ui.Context) {
+	z := float32(a.zoom)
+	if z <= 0 {
+		z = 1
+	}
+	theme := *c.Theme()
+	switch a.themeMode {
+	case "light":
+		theme = *ui.LightTheme()
+	case "dark":
+		theme = *ui.DarkTheme()
+	}
+	if a.themeMode != "system" {
+		// An appearance of its own still follows the text size the
+		// desktop asks for.
+		if p := c.Preferences(); p.TextScale > 0 && p.TextScale != 1 {
+			theme.FontSize *= p.TextScale
+		}
+	}
+	theme.FontSize *= z
+	theme.Spacing *= z
+	theme.Radius *= z
+	theme.ScrollbarWidth = 6 * z
+	c.SetTheme(&theme)
+	widgets.SetZoom(z)
+}
+
 // View builds the window: the sidebar on the left, the page on the right.
 // The settings are a page of their own rather than a panel over one: what
 // they show — a readme — wants the room, and a page can be left by picking
 // a tool in the sidebar, as a panel cannot.
 func (a *App) View(c *ui.Context) {
+	a.applyAppearance(c)
 	t := c.Theme()
 	// What the help page's engine came up with, made while the frames
 	// went on.
@@ -104,9 +149,9 @@ func (a *App) View(c *ui.Context) {
 		a.settings = false
 	}
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-		ui.Column(c).Width(190).Shrink(0).PaddingY(12).Gap(6).Background(t.Surface).Children(func() {
+		ui.Column(c).Width(widgets.Scaled(190)).Shrink(0).PaddingY(12).Gap(6).Background(t.Surface).Children(func() {
 			ui.Row(c).PaddingX(16).Children(func() {
-				ui.Text(c, "开发者工具箱").Bold().FontSize(15)
+				ui.Text(c, "开发者工具箱").Bold().FontSize(widgets.Scaled(15))
 			})
 			ui.Sidebar(c, &a.selected, func() {
 				for _, tl := range a.tools {
@@ -130,10 +175,10 @@ func (a *App) View(c *ui.Context) {
 			ui.Column(c).Padding(14, 20).Gap(2).FillWidth().BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 				name, desc := a.current().Name(), a.current().Desc()
 				if a.settings {
-					name, desc = "设置", "帮助与关于"
+					name, desc = "设置", "外观、帮助与关于"
 				}
-				ui.Text(c, name).Bold().FontSize(16)
-				ui.Text(c, desc).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, name).Bold().FontSize(widgets.Scaled(16))
+				ui.Text(c, desc).FontSize(widgets.Scaled(12)).TextColor(t.TextMuted)
 			})
 			a.page(c, t)
 		})
@@ -163,22 +208,73 @@ func (a *App) page(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// settingsPage is what the toolbox says about itself: the readme, or what
-// it is and what it is built with.
+// settingsPage is what the toolbox says about itself: how it looks, the
+// readme, or what it is and what it is built with.
 func (a *App) settingsPage(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).FillWidth().FillHeight().Gap(10).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Segmented(c.Key("panel"), &a.panel, "帮助", "关于")
+			ui.Segmented(c.Key("panel"), &a.panel, "外观", "帮助", "关于")
 			ui.Spacer(c)
 			if ui.Button(c.Key("back"), "回到工具").Tooltip("也可以按 Esc，或点左边的工具").
 				Clicked() {
 				a.settings = false
 			}
 		})
-		if a.panel == 0 {
+		switch a.panel {
+		case 0:
+			a.appearancePage(c, t)
+		case 1:
 			a.helpView(c, t)
-		} else {
+		default:
 			ui.Scroll(c).Grow(1).FillWidth().Children(func() { a.about(c, t) })
+		}
+	})
+}
+
+// appearance is the settings of how the window looks: the colors, and how
+// large the pages are drawn.
+func (a *App) appearancePage(c *ui.Context, t *ui.Theme) {
+	modes := []string{"浅色", "深色", "跟随系统"}
+	chosen := 2
+	switch a.themeMode {
+	case "light":
+		chosen = 0
+	case "dark":
+		chosen = 1
+	}
+	ui.Column(c).Gap(14).FillWidth().Children(func() {
+		widgets.Field(c, "颜色", func() {
+			// In a row of its own, so that the control is as wide as its
+			// segments rather than as wide as the page.
+			ui.Row(c).Children(func() {
+				seg := ui.Segmented(c.Key("mode"), &chosen, modes...)
+				if seg.Changed() {
+					a.themeMode = []string{"light", "dark", "system"}[chosen]
+					a.saveSettings()
+				}
+			})
+		})
+		widgets.Field(c, "缩放比例", func() {
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+				slider := ui.Slider(c.Key("zoom"), &a.zoom, minZoom, maxZoom).Grow(1).
+					Label("缩放比例").Tooltip("拖动缩放整个页面，文字、图标与控件一起变")
+				if slider.Changed() {
+					a.zoom = snapZoom(a.zoom)
+					a.saveSettings()
+				}
+				ui.Text(c, fmt.Sprintf("%d%%", int(math.Round(a.zoom*100)))).
+					Bold().FontSize(widgets.Scaled(13)).MinWidth(widgets.Scaled(46))
+				reset := ui.Button(c.Key("zoomreset"), "还原 100%").Disabled(a.zoom == 1).
+					Tooltip("回到桌面的常规大小")
+				if reset.Clicked() {
+					a.zoom = 1
+					a.saveSettings()
+				}
+			})
+		})
+		widgets.Hint(c, "缩放同时放大文字、图标与控件，立即生效，下次启动仍然记得。")
+		if a.themeMode == "system" {
+			widgets.Hint(c, "「跟随系统」用桌面现在的浅色 / 深色，主题色也随之跟着桌面。")
 		}
 	})
 }
@@ -202,7 +298,7 @@ func (a *App) helpView(c *ui.Context, t *ui.Theme) {
 		// Read-only, and in a character of one width, so that the
 		// tables of the readme keep their shape.
 		ui.TextArea(c.Key("help"), &a.help).Label("帮助").
-			ReadOnly(true).Font("monospace").FontSize(12).FillWidth().Grow(1)
+			ReadOnly(true).Font("monospace").FontSize(widgets.Scaled(12)).FillWidth().Grow(1)
 	}
 }
 
@@ -253,18 +349,18 @@ func (a *App) helpPageView(t *ui.Theme) (*mygo.WebView, error) {
 // licensed.
 func (a *App) about(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Gap(5).FillWidth().MinWidth(0).Children(func() {
-		ui.Text(c, "开发者工具箱").FontSize(15).Bold()
+		ui.Text(c, "开发者工具箱").FontSize(widgets.Scaled(15)).Bold()
 		widgets.Hint(c, mygo.App.Name()+" "+mygo.App.Version())
-		ui.Text(c, "一个用 mygo 的 Native UI 写的桌面小工具集：窗口由 Go 直接绘制，没有网页前端。").FontSize(13)
-		ui.Text(c, "MIT 许可 · Copyright © 2026 yinshuwei").FontSize(13)
+		ui.Text(c, "一个用 mygo 的 Native UI 写的桌面小工具集：窗口由 Go 直接绘制，没有网页前端。").FontSize(widgets.Scaled(13))
+		ui.Text(c, "MIT 许可 · Copyright © 2026 yinshuwei").FontSize(widgets.Scaled(13))
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			widgets.Hint(c, "源码")
-			ui.Link(c, "gitee.com/yinshuwei/mytools", "https://gitee.com/yinshuwei/mytools").FontSize(13)
+			ui.Link(c, "gitee.com/yinshuwei/mytools", "https://gitee.com/yinshuwei/mytools").FontSize(widgets.Scaled(13))
 		})
 		ui.Divider(c)
 		widgets.Hint(c, "依赖")
 		for _, dep := range buildDeps() {
-			ui.Text(c, dep).Font("monospace").FontSize(12).TextColor(t.TextMuted).SingleLine()
+			ui.Text(c, dep).Font("monospace").FontSize(widgets.Scaled(12)).TextColor(t.TextMuted).SingleLine()
 		}
 	})
 }

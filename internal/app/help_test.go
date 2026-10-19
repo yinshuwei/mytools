@@ -104,7 +104,7 @@ func TestCSSColor(t *testing.T) {
 func TestHelpFallsBackToText(t *testing.T) {
 	a := New() // no window, so no web view to be made
 	tr := ui.NewTester(a.View, 1000, 760)
-	a.settings = true
+	a.settings, a.panel = true, 1
 	tr.Frame()
 	if a.helpWeb != nil {
 		t.Fatal("没有窗口，却建出了 web view")

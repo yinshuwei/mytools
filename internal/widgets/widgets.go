@@ -31,14 +31,37 @@ func ShortcutHint(extra ui.Modifiers, key string) string {
 	return b.String()
 }
 
+// zoom is how much larger or smaller the user asked the pages to be, 1 for
+// the size the desktop asks for.
+var zoom float32 = 1
+
+// SetZoom tells the widgets how much larger the pages are to be. The app
+// sets it from its appearance settings before it builds a frame; the theme
+// carries the rest, but a size a page writes out itself does not go through
+// the theme.
+func SetZoom(z float32) {
+	if z <= 0 {
+		z = 1
+	}
+	zoom = z
+}
+
+// Scaled returns n DIPs at the zoom, for the sizes a page writes out itself:
+// the text of a caption, and the icon beside it are both Scaled(12).
+func Scaled(n float32) float32 { return n * zoom }
+
+// Zoom is how much larger the pages are drawn, for a page of another kind
+// that scales itself, such as the help page in its web view.
+func Zoom() float32 { return zoom }
+
 // Caption is a small bold label above a control.
 func Caption(c *ui.Context, s string) ui.Element {
-	return ui.Text(c, s).FontSize(12).Bold().TextColor(c.Theme().TextMuted)
+	return ui.Text(c, s).FontSize(Scaled(12)).Bold().TextColor(c.Theme().TextMuted)
 }
 
 // Hint is secondary text.
 func Hint(c *ui.Context, s string) ui.Element {
-	return ui.Text(c, s).FontSize(12).TextColor(c.Theme().TextMuted)
+	return ui.Text(c, s).FontSize(Scaled(12)).TextColor(c.Theme().TextMuted)
 }
 
 // Field stacks a caption above a control.

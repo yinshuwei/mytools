@@ -605,7 +605,7 @@ func (j *JSON) View(c *ui.Context) {
 			}
 		})
 		if j.err != "" {
-			ui.Text(c, "错误："+j.err).FontSize(12).TextColor(t.Danger)
+			ui.Text(c, "错误："+j.err).FontSize(widgets.Scaled(12)).TextColor(t.Danger)
 		}
 		// Keyed: the line reporting an error comes and goes above it, and
 		// an unkeyed row would be built anew with it, taking the input
@@ -689,7 +689,7 @@ func (j *JSON) View(c *ui.Context) {
 							Tooltip("上一个匹配（Shift+Enter 或 ↑）").Clicked() {
 							j.step(-1)
 						}
-						ui.Text(c, j.count()).FontSize(12).TextColor(t.TextMuted).SingleLine()
+						ui.Text(c, j.count()).FontSize(widgets.Scaled(12)).TextColor(t.TextMuted).SingleLine()
 						if ui.Button(c.Key("next"), "↓").Padding(0, 5).Disabled(none).
 							Tooltip("下一个匹配（Enter 或 ↓）").Clicked() {
 							j.step(1)
@@ -803,7 +803,7 @@ func (j *JSON) row(c *ui.Context, rows []row, i int) {
 				arrow = "▸"
 			}
 			b := ui.ButtonBase(c.Key("fold")).Padding(0, 3).Shrink(0).Tooltip("折叠或展开")
-			b.Children(func() { ui.Text(c, arrow).FontSize(10).TextColor(lineCol) })
+			b.Children(func() { ui.Text(c, arrow).FontSize(widgets.Scaled(10)).TextColor(lineCol) })
 			if b.Clicked() {
 				j.toggle(n)
 			}
@@ -831,7 +831,7 @@ func (j *JSON) row(c *ui.Context, rows []row, i int) {
 				value = ui.Text(c, open+"…"+n.closeBrace()).TextColor(lineCol).SingleLine().
 					Shrink(0).Tooltip(tip).Cursor(ui.CursorCopy)
 				if !j.looking() {
-					ui.Textf(c, "%d 项", len(n.kids)).FontSize(12).TextColor(lineCol)
+					ui.Textf(c, "%d 项", len(n.kids)).FontSize(widgets.Scaled(12)).TextColor(lineCol)
 				}
 			default:
 				value = ui.Text(c, open).TextColor(lineCol).SingleLine().
@@ -842,7 +842,7 @@ func (j *JSON) row(c *ui.Context, rows []row, i int) {
 				Tooltip(n.path + "（点击复制内容）").Cursor(ui.CursorCopy)
 		}
 		ui.Spacer(c)
-		if ui.Button(c.Key("copy"), "复制").FontSize(11).Padding(0, 6).Shrink(0).Clicked() {
+		if ui.Button(c.Key("copy"), "复制").FontSize(widgets.Scaled(11)).Padding(0, 6).Shrink(0).Clicked() {
 			j.copyBlock(c, n)
 		}
 	})

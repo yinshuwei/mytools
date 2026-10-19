@@ -167,11 +167,11 @@ func (cl *Calc) View(c *ui.Context) {
 			ui.Row(c).Gap(12).AlignItems(ui.Center).MinHeight(calcResultHeight).Children(func() {
 				switch {
 				case cl.err != "":
-					ui.Text(c, "错误："+cl.err).FontSize(12).TextColor(t.Danger)
+					ui.Text(c, "错误："+cl.err).FontSize(widgets.Scaled(12)).TextColor(t.Danger)
 				case cl.value != "":
 					// What is written is a calculator's digits; what the
 					// machine holds is on hovering, where it is wanted.
-					result := ui.Text(c, cl.value).FontSize(26).Bold().Selectable()
+					result := ui.Text(c, cl.value).FontSize(widgets.Scaled(26)).Bold().Selectable()
 					if cl.exact != "" {
 						result.Tooltip("浮点数里其实是 " + cl.exact + "，这里按 15 位有效数字显示")
 					}
@@ -234,7 +234,7 @@ func (cl *Calc) row(c *ui.Context, i int) {
 		ui.Text(c, "=").TextColor(t.TextMuted).Shrink(0)
 		ui.Text(c, e.value).SingleLine().Shrink(0).Tooltip("点「复制」把它放进剪贴板")
 		ui.Spacer(c)
-		copyValue = ui.Button(c.Key("copy"), "复制").FontSize(11).Padding(0, 6).Shrink(0).
+		copyValue = ui.Button(c.Key("copy"), "复制").FontSize(widgets.Scaled(11)).Padding(0, 6).Shrink(0).
 			Tooltip("复制结果 " + e.value)
 		if copyValue.Clicked() {
 			c.WriteClipboard(e.value)

@@ -1,10 +1,13 @@
 package app
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+
+	"gitee.com/yinshuwei/mytools/internal/widgets"
 )
 
 // wants is something only one page shows, to tell that it built.
@@ -106,6 +109,44 @@ func TestSettings(t *testing.T) {
 	}
 	if !tr.HasText("按字符集批量生成随机密码") {
 		t.Errorf("没有回到随机密码页：%q", tr.Texts())
+	}
+}
+
+// TestAppearance checks the appearance settings: the choice is kept for the
+// next run, the page renders, and the zoom reaches the pages.
+func TestAppearance(t *testing.T) {
+	old := settingsFile
+	settingsFile = filepath.Join(t.TempDir(), "settings.json")
+	t.Cleanup(func() { settingsFile = old })
+
+	a := New()
+	if a.themeMode != "system" || a.zoom != 1 {
+		t.Fatalf("默认外观 = %q, %v", a.themeMode, a.zoom)
+	}
+	a.themeMode, a.zoom = "dark", 1.25
+	a.saveSettings()
+
+	next := New()
+	next.loadSettings()
+	if next.themeMode != "dark" || next.zoom != 1.25 {
+		t.Errorf("读回来的外观 = %q, %v", next.themeMode, next.zoom)
+	}
+
+	next.settings, next.panel = true, 0
+	tr := ui.NewTester(next.View, 1000, 720)
+	tr.Frame()
+	if !tr.HasText("缩放比例") || !tr.HasText("跟随系统") {
+		t.Errorf("外观页没有出现：%q", tr.Texts())
+	}
+	if got := widgets.Scaled(10); got != 12.5 {
+		t.Errorf("缩放后的字号 = %v，want 12.5", got)
+	}
+	// Choosing a color from the page keeps it as well.
+	if err := tr.Click("浅色"); err != nil {
+		t.Fatal(err)
+	}
+	if next.themeMode != "light" {
+		t.Errorf("点了浅色后 themeMode = %q", next.themeMode)
 	}
 }
 

@@ -385,7 +385,7 @@ func (g *Git) toolbar(c *ui.Context, t *ui.Theme) {
 		ui.Spacer(c)
 		widgets.Hint(c, scanHint(r))
 		if r.err != "" {
-			ui.Text(c, clip("扫描失败："+r.err, 60)).FontSize(12).TextColor(t.Danger).Tooltip(r.err)
+			ui.Text(c, clip("扫描失败："+r.err, 60)).FontSize(widgets.Scaled(12)).TextColor(t.Danger).Tooltip(r.err)
 		}
 	})
 }
@@ -409,8 +409,8 @@ func (g *Git) tabBar(c *ui.Context, t *ui.Theme) {
 				if on {
 					col = t.Text
 				}
-				ui.Icon(c, icoGitFolder).FontSize(13).TextColor(col)
-				ui.Text(c, leftEllipsis(g.tabLabel(i), 20)).FontSize(12).TextColor(col).SingleLine()
+				ui.Icon(c, icoGitFolder).FontSize(widgets.Scaled(13)).TextColor(col)
+				ui.Text(c, leftEllipsis(g.tabLabel(i), 20)).FontSize(widgets.Scaled(12)).TextColor(col).SingleLine()
 				if g.closeTab(c, t, i) {
 					closed = i
 				}
@@ -433,7 +433,7 @@ func (g *Git) closeTab(c *ui.Context, t *ui.Theme, i int) bool {
 		x.Background(t.Border)
 	}
 	x.Children(func() {
-		ui.Icon(c, icoClose).FontSize(10).TextColor(t.TextMuted)
+		ui.Icon(c, icoClose).FontSize(widgets.Scaled(10)).TextColor(t.TextMuted)
 	})
 	return x.Clicked()
 }
@@ -525,22 +525,25 @@ func (g *Git) row(c *ui.Context, t *ui.Theme, r *gitRoot, i int) {
 // folderRow is a folder of repositories: a click folds it or opens it.
 func (g *Git) folderRow(c *ui.Context, t *ui.Theme, r *gitRoot, row gitRow) {
 	name := filepath.Base(row.group)
-	line := ui.Row(c).Height(gitRowHeight).FillWidth().AlignItems(ui.Center).Gap(5).PaddingX(4).
+	// The room on the right keeps the buttons clear of the scroll bar,
+	// which comes and goes over the last few DIPs of the list.
+	line := ui.Row(c).Height(widgets.Scaled(gitRowHeight)).FillWidth().AlignItems(ui.Center).
+		Gap(widgets.Scaled(5)).Padding(0, widgets.Scaled(14), 0, widgets.Scaled(4)).
 		Cursor(ui.CursorPointer).Tooltip(row.group)
 	if line.Hovered() {
 		line.Background(t.Surface)
 	}
 	line.Children(func() {
 		if row.depth > 0 {
-			ui.Box(c).Width(float32(row.depth) * gitIndent).Shrink(0)
+			ui.Box(c).Width(float32(row.depth) * widgets.Scaled(gitIndent)).Shrink(0)
 		}
 		caret := icoCaretDown
 		if row.folded {
 			caret = icoCaretRight
 		}
-		ui.Icon(c, caret).FontSize(11).TextColor(t.TextMuted)
-		ui.Icon(c, icoGitFolder).FontSize(13).TextColor(t.TextMuted)
-		ui.Text(c, name).FontSize(13).SingleLine()
+		ui.Icon(c, caret).FontSize(widgets.Scaled(11)).TextColor(t.TextMuted)
+		ui.Icon(c, icoGitFolder).FontSize(widgets.Scaled(13)).TextColor(t.TextMuted)
+		ui.Text(c, name).FontSize(widgets.Scaled(13)).SingleLine()
 		widgets.Hint(c, fmt.Sprintf("%d", row.count))
 	})
 	if line.Clicked() {
@@ -551,17 +554,18 @@ func (g *Git) folderRow(c *ui.Context, t *ui.Theme, r *gitRoot, row gitRow) {
 // repoRow is one repository: its name, what it has to say, and the buttons
 // that act on it.
 func (g *Git) repoRow(c *ui.Context, t *ui.Theme, r *gitRoot, rp *gitRepo, depth int) {
-	line := ui.Row(c).Height(gitRowHeight).FillWidth().AlignItems(ui.Center).Gap(6).PaddingX(4).
+	line := ui.Row(c).Height(widgets.Scaled(gitRowHeight)).FillWidth().AlignItems(ui.Center).
+		Gap(widgets.Scaled(6)).Padding(0, widgets.Scaled(14), 0, widgets.Scaled(4)).
 		Tooltip(rp.path + " · " + rp.gitStatus.summary())
 	if line.Hovered() {
 		line.Background(t.Surface)
 	}
 	line.Children(func() {
 		if depth > 0 {
-			ui.Box(c).Width(float32(depth) * gitIndent).Shrink(0)
+			ui.Box(c).Width(float32(depth) * widgets.Scaled(gitIndent)).Shrink(0)
 		}
-		ui.Icon(c, icoGitRepo).FontSize(13).TextColor(t.TextMuted)
-		ui.Text(c, rp.name).FontSize(13).SingleLine().Ellipsis("…").Shrink(1).MinWidth(0)
+		ui.Icon(c, icoGitRepo).FontSize(widgets.Scaled(13)).TextColor(t.TextMuted)
+		ui.Text(c, rp.name).FontSize(widgets.Scaled(13)).SingleLine().Ellipsis("…").Shrink(1).MinWidth(0)
 		ui.Spacer(c)
 		g.repoState(c, t, rp)
 		g.branchChip(c, t, rp)
@@ -575,7 +579,7 @@ func (g *Git) repoRow(c *ui.Context, t *ui.Theme, r *gitRoot, rp *gitRepo, depth
 func (g *Git) repoState(c *ui.Context, t *ui.Theme, rp *gitRepo) {
 	s := rp.gitStatus
 	if rp.op != "" {
-		ui.Text(c, rp.op+" 中…").FontSize(11).TextColor(t.Accent).Shrink(0)
+		ui.Text(c, rp.op+" 中…").FontSize(widgets.Scaled(11)).TextColor(t.Accent).Shrink(0)
 		return
 	}
 	if rp.msg != "" {
@@ -583,26 +587,26 @@ func (g *Git) repoState(c *ui.Context, t *ui.Theme, rp *gitRepo) {
 		if rp.msgBad {
 			col = t.Danger
 		}
-		ui.Text(c, clip(rp.msg, 46)).FontSize(11).TextColor(col).Shrink(0).Tooltip(rp.msg)
+		ui.Text(c, clip(rp.msg, 46)).FontSize(widgets.Scaled(11)).TextColor(col).Shrink(0).Tooltip(rp.msg)
 	}
 	if s.err != "" {
-		ui.Text(c, "状态未知").FontSize(11).TextColor(t.Danger).Shrink(0).Tooltip(s.err)
+		ui.Text(c, "状态未知").FontSize(widgets.Scaled(11)).TextColor(t.Danger).Shrink(0).Tooltip(s.err)
 		return
 	}
 	if s.conflicts > 0 {
-		ui.Text(c, fmt.Sprintf("冲突 %d", s.conflicts)).FontSize(11).TextColor(t.Danger).Shrink(0).
+		ui.Text(c, fmt.Sprintf("冲突 %d", s.conflicts)).FontSize(widgets.Scaled(11)).TextColor(t.Danger).Shrink(0).
 			Tooltip("有文件冲突，先把它们解决掉")
 	}
 	if n := s.changes(); n > 0 {
-		ui.Text(c, fmt.Sprintf("● %d", n)).FontSize(11).TextColor(t.Warning).Shrink(0).
+		ui.Text(c, fmt.Sprintf("● %d", n)).FontSize(widgets.Scaled(11)).TextColor(t.Warning).Shrink(0).
 			Tooltip(s.summary())
 	}
 	if s.ahead > 0 {
-		ui.Text(c, fmt.Sprintf("↑%d", s.ahead)).FontSize(11).TextColor(t.Accent).Shrink(0).
+		ui.Text(c, fmt.Sprintf("↑%d", s.ahead)).FontSize(widgets.Scaled(11)).TextColor(t.Accent).Shrink(0).
 			Tooltip(fmt.Sprintf("有 %d 个提交还没 push", s.ahead))
 	}
 	if s.behind > 0 {
-		ui.Text(c, fmt.Sprintf("↓%d", s.behind)).FontSize(11).TextColor(t.Accent).Shrink(0).
+		ui.Text(c, fmt.Sprintf("↓%d", s.behind)).FontSize(widgets.Scaled(11)).TextColor(t.Accent).Shrink(0).
 			Tooltip(fmt.Sprintf("远端有 %d 个提交还没 pull", s.behind))
 	}
 }
@@ -621,11 +625,12 @@ func (g *Git) branchChip(c *ui.Context, t *ui.Theme, rp *gitRepo) {
 	case name == "":
 		name = "?"
 	}
-	chip := ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(4).Padding(1, 6).Radius(4).
+	chip := ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(widgets.Scaled(4)).
+		Padding(widgets.Scaled(1), widgets.Scaled(6)).Radius(4).
 		Border(1, t.Border).Tooltip(rp.gitStatus.summary())
 	chip.Children(func() {
-		ui.Icon(c, icoGitRepo).FontSize(10).TextColor(t.TextMuted)
-		ui.Text(c, name).FontSize(11).TextColor(t.TextMuted).SingleLine()
+		ui.Icon(c, icoGitRepo).FontSize(widgets.Scaled(10)).TextColor(t.TextMuted)
+		ui.Text(c, name).FontSize(widgets.Scaled(11)).TextColor(t.TextMuted).SingleLine()
 	})
 }
 
@@ -749,7 +754,8 @@ func (g *Git) open(c *ui.Context, rp *gitRepo, how string) {
 // iconButton is a button with only an icon, named for what it does.
 func iconButton(c *ui.Context, key any, tip string, ico *ui.SVG, on bool) ui.Element {
 	t := c.Theme()
-	b := ui.ButtonBase(c.Key(key)).Size(22, 22).Radius(4).Label(tip).Tooltip(tip).Disabled(!on)
+	b := ui.ButtonBase(c.Key(key)).Size(widgets.Scaled(22), widgets.Scaled(22)).Radius(4).
+		Label(tip).Tooltip(tip).Disabled(!on)
 	if on && b.Hovered() {
 		b.Background(t.SurfaceHover)
 	}
@@ -758,7 +764,7 @@ func iconButton(c *ui.Context, key any, tip string, ico *ui.SVG, on bool) ui.Ele
 		if on {
 			col = t.Text
 		}
-		ui.Icon(c, ico).FontSize(14).TextColor(col)
+		ui.Icon(c, ico).FontSize(widgets.Scaled(14)).TextColor(col)
 	})
 	return b
 }

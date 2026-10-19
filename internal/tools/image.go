@@ -297,14 +297,14 @@ func (im *Image) encodeView(c *ui.Context, t *ui.Theme) {
 		widgets.Hint(c, "支持 PNG / JPEG / GIF / WebP / BMP")
 	})
 	if im.err != "" {
-		ui.Text(c, "错误："+im.err).FontSize(12).TextColor(t.Danger)
+		ui.Text(c, "错误："+im.err).FontSize(widgets.Scaled(12)).TextColor(t.Danger)
 	}
 	if im.bitmap != nil {
 		ui.Column(c).PaddingY(8).Center().FillWidth().Children(func() {
 			ui.Image(c.Key("preview"), im.bitmap).Label("图片预览").MaxHeight(previewHeight)
 		})
 	} else if im.skip != "" {
-		ui.Text(c, im.skip).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, im.skip).FontSize(widgets.Scaled(12)).TextColor(t.TextMuted)
 	}
 
 	// What is copied or saved is the whole text; only the showing of it is
@@ -336,9 +336,9 @@ func (im *Image) encodeView(c *ui.Context, t *ui.Theme) {
 	ui.Row(c).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
 		widgets.Hint(c, "图片大了这串字符会很长，这里只显示开头；「复制」和「保存为文件…」拿到的都是完整的")
 		if im.saveErr != "" {
-			ui.Text(c, "保存失败："+im.saveErr).FontSize(12).TextColor(t.Danger)
+			ui.Text(c, "保存失败："+im.saveErr).FontSize(widgets.Scaled(12)).TextColor(t.Danger)
 		} else if im.saved != "" {
-			ui.Text(c, "已保存到 "+im.saved).FontSize(12).TextColor(t.Success)
+			ui.Text(c, "已保存到 "+im.saved).FontSize(widgets.Scaled(12)).TextColor(t.Success)
 		}
 	})
 }
@@ -366,7 +366,7 @@ func (im *Image) decodeView(c *ui.Context, t *ui.Theme) {
 		widgets.Hint(c, "data:image/png;base64,… 或直接的 Base64")
 	})
 	if im.picErr != "" {
-		ui.Text(c, "错误："+im.picErr).FontSize(12).TextColor(t.Danger)
+		ui.Text(c, "错误："+im.picErr).FontSize(widgets.Scaled(12)).TextColor(t.Danger)
 	}
 	// Keyed: the line reporting an error comes and goes above it.
 	widgets.FieldKey(c, "textfield", "Base64 内容", func() {
@@ -383,7 +383,7 @@ func (im *Image) decodeView(c *ui.Context, t *ui.Theme) {
 			ui.Image(c.Key("pic"), im.pic).Label("读出的图片").MaxHeight(previewHeight)
 		})
 	} else if im.picNote != "" {
-		ui.Text(c, im.picNote).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, im.picNote).FontSize(widgets.Scaled(12)).TextColor(t.TextMuted)
 	} else {
 		ui.Column(c).PaddingY(8).Center().FillWidth().Children(func() {
 			widgets.Hint(c, "读出来的图片会显示在这里")
@@ -396,7 +396,7 @@ func (im *Image) decodeView(c *ui.Context, t *ui.Theme) {
 			im.copyPic(c)
 		}
 		if im.picInfo != "" {
-			ui.Text(c, im.picInfo).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, im.picInfo).FontSize(widgets.Scaled(12)).TextColor(t.TextMuted)
 		}
 		ui.Spacer(c)
 		widgets.Hint(c, "复制的是图片本身，可直接粘贴到微信、文档或图片编辑器")
