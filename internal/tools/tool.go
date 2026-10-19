@@ -39,5 +39,6 @@ func All() []Tool {
 		&Password{},
 		&Image{},
 		&Calc{},
+		&Git{},
 	}
 }

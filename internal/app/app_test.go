@@ -16,6 +16,7 @@ var wants = map[string]string{
 	"pw":    "密码",
 	"img":   "选择图片…",
 	"calc":  "复制结果",
+	"git":   "选择 Root 目录…",
 }
 
 // TestPagesRender builds every page in a headless window: a page that
