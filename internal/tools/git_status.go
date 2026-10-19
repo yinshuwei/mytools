@@ -27,6 +27,9 @@ const (
 	gitStatusTimeout = 20 * time.Second
 	// gitActionTimeout bounds a pull or a push, which talks to a remote.
 	gitActionTimeout = 5 * time.Minute
+	// gitFetchTimeout bounds a fetch, which talks to a remote too but only
+	// for the refs.
+	gitFetchTimeout = 60 * time.Second
 )
 
 // gitSkipDirs are the directories the walk does not go into: the contents
@@ -52,6 +55,9 @@ type gitStatus struct {
 	untracked int    // files git does not know
 	conflicts int    // files with merge conflicts
 	err       string // why the status could not be read
+	// fetch is why the last fetch from the remote failed, when it did: the
+	// counts of ahead and behind are then as of the last one that worked.
+	fetch string
 }
 
 // changes is how many files are not committed.
@@ -97,6 +103,9 @@ func (s gitStatus) summary() string {
 	}
 	if s.conflicts > 0 {
 		parts = append(parts, fmt.Sprintf("冲突 %d", s.conflicts))
+	}
+	if s.fetch != "" {
+		parts = append(parts, "fetch 失败："+s.fetch)
 	}
 	if len(parts) == 0 {
 		return "工作区干净"
@@ -160,6 +169,31 @@ func scanGitRoots(root string) ([]*gitRepo, error) {
 	}
 	sort.Slice(repos, func(i, j int) bool { return repos[i].rel < repos[j].rel })
 	return repos, nil
+}
+
+// fetchStatuses fetches each repository, then reads its status, a few at a
+// time. A fetch that fails leaves the status as of the last one that
+// worked, and says why.
+func fetchStatuses(paths []string) []gitStatus {
+	statuses := make([]gitStatus, len(paths))
+	sem := make(chan struct{}, gitStatusWorkers)
+	var wg sync.WaitGroup
+	for i, p := range paths {
+		wg.Add(1)
+		go func(i int, p string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			fetchErr := runGitFetch(p)
+			st := readGitStatus(p)
+			if fetchErr != nil {
+				st.fetch = fetchErr.Error()
+			}
+			statuses[i] = st
+		}(i, p)
+	}
+	wg.Wait()
+	return statuses
 }
 
 // readStatuses reads the status of each path, a few at a time, as each is a
@@ -282,6 +316,15 @@ func (s *gitStatus) countXY(xy string) {
 	if xy[1] != '.' {
 		s.unstaged++
 	}
+}
+
+// runGitFetch brings the remote refs up to date, so that ahead and behind
+// count what the server has now rather than what it had at the last fetch.
+// All the remotes are fetched; branches deleted on the server are kept, as
+// pruning them is the user's call.
+func runGitFetch(dir string) error {
+	_, err := gitOutput(dir, gitFetchTimeout, "fetch", "--all", "--quiet")
+	return err
 }
 
 // runGitAction pulls or pushes one repository. A branch without an upstream

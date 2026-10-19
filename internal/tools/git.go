@@ -235,8 +235,9 @@ func (g *Git) scan(r *gitRoot) {
 	}()
 }
 
-// refreshStatuses reads the statuses of the repositories of a root again,
-// without walking the tree: what a rescan does, minus the finding.
+// refreshStatuses fetches the repositories of a root and reads their
+// statuses again, without walking the tree: what a rescan does, minus the
+// finding.
 func (g *Git) refreshStatuses(r *gitRoot) {
 	if r == nil || r.scanning || len(r.repos) == 0 {
 		return
@@ -250,7 +251,7 @@ func (g *Git) refreshStatuses(r *gitRoot) {
 	}
 	go func() {
 		start := time.Now()
-		statuses := readStatuses(paths)
+		statuses := fetchStatuses(paths)
 		byPath := make(map[string]gitStatus, len(paths))
 		for i, p := range paths {
 			byPath[p] = statuses[i]
@@ -319,7 +320,15 @@ func (g *Git) refresh(r *gitRoot, rp *gitRepo) {
 	svc, ch := g.svc, g.acts
 	root, path := r.path, rp.path
 	go func() {
-		ch <- gitActDone{root: root, path: path, action: "refresh", status: readGitStatus(path)}
+		// The status of the last fetch is not the status of the server:
+		// fetch first, so that what is ahead or behind counts what is
+		// there now.
+		fetchErr := runGitFetch(path)
+		st := readGitStatus(path)
+		if fetchErr != nil {
+			st.fetch = fetchErr.Error()
+		}
+		ch <- gitActDone{root: root, path: path, action: "refresh", status: st}
 		svc.Invalidate()
 	}()
 }
@@ -529,7 +538,7 @@ func (g *Git) rootView(c *ui.Context, t *ui.Theme, r *gitRoot) {
 				r.collapsed[p] = true
 			}
 		}
-		if iconAction(c, "refreshall", "刷新状态（重新读取各仓库的 git status，不重新遍历目录）",
+		if iconAction(c, "refreshall", "刷新状态（先从远端 fetch，再读取各仓库的 git status；不重新遍历目录）",
 			icoRefresh, !r.scanning && len(r.repos) > 0) {
 			g.refreshStatuses(r)
 		}
@@ -645,6 +654,10 @@ func (g *Git) repoState(c *ui.Context, t *ui.Theme, rp *gitRepo) {
 		ui.Text(c, "状态未知").FontSize(widgets.Scaled(11)).TextColor(t.Danger).Shrink(0).Tooltip(s.err)
 		return
 	}
+	if s.fetch != "" {
+		ui.Text(c, "未取到远端").FontSize(widgets.Scaled(11)).TextColor(t.Warning).Shrink(0).
+			Tooltip("fetch 失败，领先 / 落后是上一次取到的：\n" + s.fetch)
+	}
 	if s.conflicts > 0 {
 		ui.Text(c, fmt.Sprintf("冲突 %d", s.conflicts)).FontSize(widgets.Scaled(11)).TextColor(t.Danger).Shrink(0).
 			Tooltip("有文件冲突，先把它们解决掉")
@@ -736,7 +749,7 @@ func (g *Git) repoActions(c *ui.Context, t *ui.Theme, r *gitRoot, rp *gitRepo) {
 		g.open(c, rp, "files")
 	}
 	g.editorActions(c, rp, busy)
-	if iconAction(c, "refresh", "刷新状态（git status）", icoRefresh, !busy) {
+	if iconAction(c, "refresh", "刷新状态（先从远端 fetch，再读取 git status）", icoRefresh, !busy) {
 		g.refresh(r, rp)
 	}
 }

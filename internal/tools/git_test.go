@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -344,5 +345,61 @@ func TestGitCloseTab(t *testing.T) {
 	next.loadConfig()
 	if len(next.roots) != 1 || next.roots[0].path != b {
 		t.Errorf("下次启动的 roots = %+v，want [%q]", next.roots, b)
+	}
+}
+
+// gitIn runs git in dir, failing the test when it does not work.
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// TestGitFetchUpdatesStatus checks that a refresh counts what the server
+// has now: a clone's status stays as of its last fetch until one is made,
+// and is behind the server after it.
+func TestGitFetchUpdatesStatus(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("没有 git")
+	}
+	dir := t.TempDir()
+	bare, work, other := filepath.Join(dir, "bare.git"), filepath.Join(dir, "work"), filepath.Join(dir, "other")
+	if err := os.MkdirAll(bare, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, bare, "init", "--bare", "-b", "main")
+	gitIn(t, dir, "clone", bare, work)
+	config := func(p string) {
+		gitIn(t, p, "config", "user.email", "a@b.c")
+		gitIn(t, p, "config", "user.name", "a")
+	}
+	write := func(p, s string) {
+		if err := os.WriteFile(filepath.Join(p, "f.txt"), []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	config(work)
+	write(work, "one")
+	gitIn(t, work, "add", ".")
+	gitIn(t, work, "commit", "-qm", "one")
+	gitIn(t, work, "push", "-qu", "origin", "main")
+
+	gitIn(t, dir, "clone", bare, other)
+	config(other)
+	write(other, "two")
+	gitIn(t, other, "commit", "-qam", "two")
+	gitIn(t, other, "push", "-q")
+
+	if st := readGitStatus(work); st.behind != 0 {
+		t.Fatalf("没有 fetch 就落后 %d：状态不该自己去问服务器", st.behind)
+	}
+	if err := runGitFetch(work); err != nil {
+		t.Fatal(err)
+	}
+	if st := readGitStatus(work); st.behind != 1 {
+		t.Errorf("fetch 后 behind = %d，want 1", st.behind)
 	}
 }
