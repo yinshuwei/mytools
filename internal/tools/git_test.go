@@ -185,6 +185,32 @@ func TestGitRows(t *testing.T) {
 	}
 }
 
+// TestGitStatusRefresh checks that a refresh reads the statuses again in
+// place: the rows keep their place, and what a repository is doing stays.
+func TestGitStatusRefresh(t *testing.T) {
+	rp := &gitRepo{path: "/w/a", rel: "a", name: "a", op: "pull", msg: "上一次"}
+	r := &gitRoot{path: "/w", repos: []*gitRepo{rp}}
+	g := &Git{roots: []*gitRoot{r}}
+	g.applyScan(gitScanDone{
+		root: "/w",
+		statuses: map[string]gitStatus{
+			"/w/a": {branch: "dev", upstream: "origin/dev", ahead: 2},
+		},
+	})
+	if rp.branch != "dev" || rp.ahead != 2 {
+		t.Errorf("刷新后 = %+v", rp.gitStatus)
+	}
+	if rp.op != "pull" || rp.msg != "上一次" {
+		t.Errorf("刷新动了正在进行的动作：op=%q msg=%q", rp.op, rp.msg)
+	}
+	if len(r.repos) != 1 || r.repos[0] != rp {
+		t.Errorf("刷新换掉了仓库行：%+v", r.repos)
+	}
+	if r.scanned.IsZero() {
+		t.Error("刷新后没有记下时间")
+	}
+}
+
 // TestGitRootsRemembered checks that the roots open now are the roots of
 // the next run.
 func TestGitRootsRemembered(t *testing.T) {

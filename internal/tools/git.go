@@ -81,12 +81,14 @@ type gitPicked struct {
 	err  error
 }
 
-// gitScanDone is what a scan of one root found.
+// gitScanDone is what a scan of one root found, or, when only the statuses
+// were read again, the statuses by path.
 type gitScanDone struct {
-	root  string
-	repos []*gitRepo
-	err   error
-	took  time.Duration
+	root     string
+	repos    []*gitRepo
+	statuses map[string]gitStatus
+	err      error
+	took     time.Duration
 }
 
 // gitActDone is what a pull or a push came to, and the status it left.
@@ -233,7 +235,32 @@ func (g *Git) scan(r *gitRoot) {
 	}()
 }
 
-// applyScan takes what a scan found.
+// refreshStatuses reads the statuses of the repositories of a root again,
+// without walking the tree: what a rescan does, minus the finding.
+func (g *Git) refreshStatuses(r *gitRoot) {
+	if r == nil || r.scanning || len(r.repos) == 0 {
+		return
+	}
+	r.scanning, r.err = true, ""
+	svc, ch := g.svc, g.scans
+	root := r.path
+	paths := make([]string, len(r.repos))
+	for i, rp := range r.repos {
+		paths[i] = rp.path
+	}
+	go func() {
+		start := time.Now()
+		statuses := readStatuses(paths)
+		byPath := make(map[string]gitStatus, len(paths))
+		for i, p := range paths {
+			byPath[p] = statuses[i]
+		}
+		ch <- gitScanDone{root: root, statuses: byPath, took: time.Since(start)}
+		svc.Invalidate()
+	}()
+}
+
+// applyScan takes what a scan found, or the statuses a refresh read.
 func (g *Git) applyScan(d gitScanDone) {
 	r := g.root(d.root)
 	if r == nil {
@@ -244,7 +271,24 @@ func (g *Git) applyScan(d gitScanDone) {
 		r.err = d.err.Error()
 		return
 	}
-	r.err, r.repos = "", d.repos
+	r.err = ""
+	if d.statuses != nil {
+		// A refresh only says what the repositories are like now: the rows
+		// keep their place, and a pull or a push still running stays so.
+		for path, st := range d.statuses {
+			rp := r.repo(path)
+			if rp == nil {
+				continue
+			}
+			if st.err != "" {
+				rp.err = st.err
+			} else {
+				rp.gitStatus = st
+			}
+		}
+		return
+	}
+	r.repos = d.repos
 }
 
 // run pulls or pushes one repository, in the background, and reads its
@@ -475,15 +519,19 @@ func (g *Git) rootView(c *ui.Context, t *ui.Theme, r *gitRoot) {
 			widgets.Hint(c, fmt.Sprintf("匹配 %d 个", r.matches()))
 		}
 		ui.Spacer(c)
-		if ui.Button(c.Key("expandall"), "全部展开").Tooltip("展开所有文件夹").
+		if ui.Button(c.Key("expandall"), "展开").Tooltip("展开所有文件夹").
 			Disabled(len(r.collapsed) == 0).Clicked() {
 			r.collapsed = map[string]bool{}
 		}
-		if ui.Button(c.Key("foldall"), "全部折叠").Tooltip("折叠所有文件夹").
+		if ui.Button(c.Key("foldall"), "折叠").Tooltip("折叠所有文件夹").
 			Disabled(len(r.repos) == 0).Clicked() {
 			for _, p := range r.groups() {
 				r.collapsed[p] = true
 			}
+		}
+		if iconAction(c, "refreshall", "刷新状态（重新读取各仓库的 git status，不重新遍历目录）",
+			icoRefresh, !r.scanning && len(r.repos) > 0) {
+			g.refreshStatuses(r)
 		}
 	})
 
@@ -876,6 +924,8 @@ func (r *gitRoot) buildRows(q string) []gitRow {
 // scanHint says what the last scan found, or that one is under way.
 func scanHint(r *gitRoot) string {
 	switch {
+	case r.scanning && len(r.repos) > 0:
+		return "正在刷新状态…"
 	case r.scanning:
 		return "正在扫描…"
 	case r.err != "":

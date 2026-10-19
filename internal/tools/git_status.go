@@ -131,8 +131,8 @@ func (r *gitRepo) match(q string) bool {
 	return false
 }
 
-// newGitRepo reads one repository, status and all.
-func newGitRepo(root, path string) *gitRepo {
+// newGitRepo is one repository found under root, with its status.
+func newGitRepo(root, path string, st gitStatus) *gitRepo {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		rel = path
@@ -141,11 +141,10 @@ func newGitRepo(root, path string) *gitRepo {
 	if rel != "." {
 		name = filepath.Base(rel)
 	}
-	return &gitRepo{path: path, rel: rel, name: name, gitStatus: readGitStatus(path)}
+	return &gitRepo{path: path, rel: rel, name: name, gitStatus: st}
 }
 
 // scanGitRoots finds every repository under root and reads their statuses.
-// The statuses are read a few at a time, as each is a process of its own.
 func scanGitRoots(root string) ([]*gitRepo, error) {
 	if _, err := exec.LookPath("git"); err != nil {
 		return nil, errors.New("没有找到 git，请先安装并把它放进 PATH")
@@ -154,7 +153,19 @@ func scanGitRoots(root string) ([]*gitRepo, error) {
 	if err != nil {
 		return nil, err
 	}
+	statuses := readStatuses(paths)
 	repos := make([]*gitRepo, len(paths))
+	for i, p := range paths {
+		repos[i] = newGitRepo(root, p, statuses[i])
+	}
+	sort.Slice(repos, func(i, j int) bool { return repos[i].rel < repos[j].rel })
+	return repos, nil
+}
+
+// readStatuses reads the status of each path, a few at a time, as each is a
+// process of its own.
+func readStatuses(paths []string) []gitStatus {
+	statuses := make([]gitStatus, len(paths))
 	sem := make(chan struct{}, gitStatusWorkers)
 	var wg sync.WaitGroup
 	for i, p := range paths {
@@ -163,12 +174,11 @@ func scanGitRoots(root string) ([]*gitRepo, error) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			repos[i] = newGitRepo(root, p)
+			statuses[i] = readGitStatus(p)
 		}(i, p)
 	}
 	wg.Wait()
-	sort.Slice(repos, func(i, j int) bool { return repos[i].rel < repos[j].rel })
-	return repos, nil
+	return statuses
 }
 
 // findGitRepos walks root for directories holding a .git: a directory in a
