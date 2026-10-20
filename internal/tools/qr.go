@@ -17,7 +17,7 @@ import (
 	"github.com/makiuchi-d/gozxing/qrcode"
 	xdraw "golang.org/x/image/draw"
 
-	"gitee.com/yinshuwei/mytools/internal/widgets"
+	"github.com/yinshuwei/mytools/internal/widgets"
 )
 
 // QR makes a QR code of a text, with room for a logo in its middle, and

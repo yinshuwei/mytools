@@ -7,7 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"gitee.com/yinshuwei/mytools/internal/widgets"
+	"github.com/yinshuwei/mytools/internal/widgets"
 )
 
 // wants is something only one page shows, to tell that it built.

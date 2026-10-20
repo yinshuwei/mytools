@@ -9,7 +9,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"gitee.com/yinshuwei/mytools/internal/widgets"
+	"github.com/yinshuwei/mytools/internal/widgets"
 )
 
 // Codec encodes text to and decodes it from a transfer representation.

@@ -15,7 +15,7 @@ import (
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 
-	"gitee.com/yinshuwei/mytools/internal/widgets"
+	"github.com/yinshuwei/mytools/internal/widgets"
 )
 
 // previewChars is how much of a long text the boxes show. A Base64 of a

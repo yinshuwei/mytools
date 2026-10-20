@@ -5,13 +5,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
 	// Every zone is known wherever the app runs, not only where the system
 	// keeps its own zone files.
 	_ "time/tzdata"
 
 	"github.com/egoist/mygo/ui"
 
-	"gitee.com/yinshuwei/mytools/internal/widgets"
+	"github.com/yinshuwei/mytools/internal/widgets"
 )
 
 // Clock converts between Unix timestamps and date and time, in a zone of

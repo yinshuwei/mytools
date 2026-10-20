@@ -6,7 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	mytools "gitee.com/yinshuwei/mytools"
+	mytools "github.com/yinshuwei/mytools"
 )
 
 // darkTheme is a theme to dress a page in, standing for a window's.

@@ -12,7 +12,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	"gitee.com/yinshuwei/mytools/internal/app"
+	"github.com/yinshuwei/mytools/internal/app"
 )
 
 // version is what the About panel shows; a build may set it with

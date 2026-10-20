@@ -77,7 +77,7 @@ func TestShots(t *testing.T) {
 	shot("qr", 1000, 680, func(a *App, tr *ui.Tester) {
 		click(tr, "二维码")
 		click(tr, "二维码内容")
-		tr.Type("https://gitee.com/yinshuwei/mytools")
+		tr.Type("https://github.com/yinshuwei/mytools")
 	})
 
 	shot("settings", 1000, 680, func(a *App, tr *ui.Tester) {

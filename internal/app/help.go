@@ -14,8 +14,8 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 
-	mytools "gitee.com/yinshuwei/mytools"
-	"gitee.com/yinshuwei/mytools/internal/widgets"
+	mytools "github.com/yinshuwei/mytools"
+	"github.com/yinshuwei/mytools/internal/widgets"
 )
 
 // helpAsText is set by MYTOOLS_NO_WEBVIEW, which asks for the readme as the

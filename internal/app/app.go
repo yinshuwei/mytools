@@ -11,9 +11,9 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	mytools "gitee.com/yinshuwei/mytools"
-	"gitee.com/yinshuwei/mytools/internal/tools"
-	"gitee.com/yinshuwei/mytools/internal/widgets"
+	mytools "github.com/yinshuwei/mytools"
+	"github.com/yinshuwei/mytools/internal/tools"
+	"github.com/yinshuwei/mytools/internal/widgets"
 )
 
 // App is the toolbox.
@@ -366,7 +366,7 @@ func (a *App) about(c *ui.Context, t *ui.Theme) {
 		ui.Text(c, "MIT 许可 · Copyright © 2026 yinshuwei").FontSize(widgets.Scaled(13))
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			widgets.Hint(c, "源码")
-			ui.Link(c, "gitee.com/yinshuwei/mytools", "https://gitee.com/yinshuwei/mytools").FontSize(widgets.Scaled(13))
+			ui.Link(c, "github.com/yinshuwei/mytools", "https://github.com/yinshuwei/mytools").FontSize(widgets.Scaled(13))
 		})
 		ui.Divider(c)
 		widgets.Hint(c, "依赖")

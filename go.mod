@@ -1,4 +1,4 @@
-module gitee.com/yinshuwei/mytools
+module github.com/yinshuwei/mytools
 
 go 1.27.1
 
