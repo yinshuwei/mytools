@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -401,5 +402,38 @@ func TestGitFetchUpdatesStatus(t *testing.T) {
 	}
 	if st := readGitStatus(work); st.behind != 1 {
 		t.Errorf("fetch 后 behind = %d，want 1", st.behind)
+	}
+}
+
+// TestTerminalSpecs checks the order the terminals are tried in: the
+// concrete ones before the alternatives wrapper, which drops the options it
+// does not know (--working-directory among them), and a way into the
+// directory for those without an option for it.
+func TestTerminalSpecs(t *testing.T) {
+	const dir = "/w/repo"
+	specs := terminalsFor(dir)
+	index := map[string]int{}
+	for i, s := range specs {
+		index[s.name] = i
+	}
+	gnome, ok := index["gnome-terminal"]
+	if !ok {
+		t.Fatal("没有 gnome-terminal")
+	}
+	wrapper, ok := index["x-terminal-emulator"]
+	if !ok {
+		t.Fatal("没有 x-terminal-emulator")
+	}
+	if wrapper < gnome {
+		t.Error("x-terminal-emulator 排在具体终端前面，它会丢掉 --working-directory")
+	}
+	if got := specs[gnome].args; len(got) != 1 || got[0] != "--working-directory="+dir {
+		t.Errorf("gnome-terminal 的参数 = %v", got)
+	}
+	for _, name := range []string{"x-terminal-emulator", "xterm"} {
+		args := specs[index[name]].args
+		if len(args) < 6 || args[0] != "-e" || !slices.Contains(args, dir) {
+			t.Errorf("%s 没有把目录带上：%v", name, args)
+		}
 	}
 }
