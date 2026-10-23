@@ -50,6 +50,7 @@ func All() []Tool {
 		&QR{},
 		&Password{},
 		&Image{},
+		&Screenshot{},
 		&Calc{},
 		&Git{},
 	}

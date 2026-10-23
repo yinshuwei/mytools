@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	mytools "github.com/yinshuwei/mytools"
+	"github.com/yinshuwei/mytools/internal/shots"
 	"github.com/yinshuwei/mytools/internal/tools"
 	"github.com/yinshuwei/mytools/internal/widgets"
 )
@@ -26,6 +27,10 @@ type App struct {
 	settings bool   // the settings page is the one shown
 	panel    int    // 0 外观, 1 帮助, 2 关于
 	help     string // the readme, carried in the binary
+
+	shotTool *tools.Screenshot
+	shots    *shots.Service
+	tray     *mygo.Tray
 
 	// themeMode is "light", "dark" or "system", and zoom how much larger
 	// than usual the pages are drawn: the appearance the user chose.
@@ -59,6 +64,13 @@ func New() *App {
 		helpMade:  make(chan helpStart, 1),
 		themeMode: "system",
 		zoom:      1,
+	}
+	for _, t := range a.tools {
+		if s, ok := t.(*tools.Screenshot); ok {
+			a.shotTool = s
+			s.Shot = a.TakeShot
+			s.Hotkey = shotHotkeyText()
+		}
 	}
 	a.selected = a.tools[0].ID()
 	a.picked = a.selected

@@ -59,6 +59,7 @@ func main() {
 			Content:  ui.View(a.View),
 		})
 		a.SetWindow(win)
+		a.SetupDesktop()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

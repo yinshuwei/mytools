@@ -18,6 +18,7 @@ var wants = map[string]string{
 	"qr":    "纠错级别",
 	"pw":    "密码",
 	"img":   "选择图片…",
+	"shot":  "开始截图",
 	"calc":  "复制结果",
 	"git":   "选择 Root 目录…",
 }

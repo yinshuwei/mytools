@@ -1,0 +1,126 @@
+package app
+
+import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
+	"log"
+	"math"
+	"runtime"
+
+	"github.com/egoist/mygo"
+
+	"github.com/yinshuwei/mytools/internal/shots"
+)
+
+// TakeShot starts a screenshot, whatever asked for it: the page's button,
+// the tray menu, or the global shortcut.
+func (a *App) TakeShot() {
+	if a.shots != nil {
+		a.shots.Start()
+	}
+}
+
+// SetupDesktop gives the toolbox its desktop manners: the global shortcut,
+// the tray icon, and the screenshot service. It runs once, after the window
+// exists.
+func (a *App) SetupDesktop() {
+	if a.win == nil {
+		return
+	}
+	a.shots = shots.New(a.win)
+	if a.shotTool != nil {
+		a.shotTool.Shot = a.TakeShot
+		a.shotTool.Hotkey = shotHotkeyText()
+		if err := a.shots.Problem(); err != nil {
+			a.shotTool.Problem = shots.Friendly(err)
+		}
+		if err := mygo.GlobalShortcut.Register(shotAccelerator(), a.TakeShot); err != nil {
+			log.Printf("全局快捷键 %s 注册失败：%v", shotAccelerator(), err)
+			a.shotTool.HotkeyProblem = "全局快捷键 " + shotHotkeyText() +
+				" 注册失败（可能被别的程序占用了）：" + err.Error() +
+				"；页面上的按钮仍然可以截图。"
+		} else {
+			log.Printf("全局快捷键 %s 已注册", shotAccelerator())
+		}
+	}
+	a.setupTray()
+}
+
+func (a *App) setupTray() {
+	menu := mygo.NewMenu([]*mygo.MenuItem{
+		{Label: "截图", Click: func(*mygo.MenuItem, *mygo.Window) { a.TakeShot() }},
+		{Label: "显示主窗口", Click: func(*mygo.MenuItem, *mygo.Window) {
+			a.win.Show()
+			a.win.Focus()
+		}},
+		mygo.Separator(),
+		{Label: "退出", Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
+	})
+	tray, err := mygo.NewTray(mygo.TrayOptions{
+		Icon:           trayIcon(),
+		IconIsTemplate: runtime.GOOS == "darwin",
+		ToolTip:        "开发者工具箱",
+		Menu:           menu,
+	})
+	if err != nil {
+		// A tray is a convenience, and some Linux desktops have no
+		// AppIndicator host. The shortcut and the page still work.
+		log.Printf("托盘图标不可用：%v", err)
+		return
+	}
+	a.tray = tray
+}
+
+// shotAccelerator is the global shortcut as mygo names it.
+func shotAccelerator() string {
+	if runtime.GOOS == "darwin" {
+		return "Command+Shift+A"
+	}
+	return "Control+Alt+A"
+}
+
+// shotHotkeyText is the same shortcut for people to read.
+func shotHotkeyText() string {
+	if runtime.GOOS == "darwin" {
+		return "⌘⇧A"
+	}
+	return "Ctrl+Alt+A"
+}
+
+// trayIcon draws a small camera: the tray has no image file to load, and a
+// drawn glyph stays sharp at any scale. macOS tints a template icon itself,
+// so there it is black and transparent.
+func trayIcon() []byte {
+	const size = 32
+	img := image.NewNRGBA(image.Rect(0, 0, size, size))
+	ink := color.NRGBA{R: 79, G: 124, B: 255, A: 255}
+	if runtime.GOOS == "darwin" {
+		ink = color.NRGBA{A: 255}
+	}
+	fill := func(r image.Rectangle) {
+		draw.Draw(img, r, image.NewUniform(ink), image.Point{}, draw.Src)
+	}
+	// Camera body, and the bump that holds the viewfinder.
+	fill(image.Rect(5, 10, 27, 12))
+	fill(image.Rect(5, 23, 27, 25))
+	fill(image.Rect(5, 12, 7, 23))
+	fill(image.Rect(25, 12, 27, 23))
+	fill(image.Rect(12, 6, 20, 10))
+	// The lens, a ring two pixels thick.
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			d := math.Hypot(float64(x)+0.5-16, float64(y)+0.5-18)
+			if d >= 4.5 && d <= 6.5 {
+				img.Set(x, y, ink)
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil
+	}
+	return buf.Bytes()
+}
