@@ -44,6 +44,21 @@ Windows 上是同一套参数，用 `scripts\build.cmd`（或直接 `scripts/bui
 go tool mygo build -platform darwin/universal,windows/amd64,linux/amd64
 ```
 
+### 发布到 GitHub Releases
+
+`.github/workflows/release.yml` 在推送 `v` 开头的标签时自动：
+
+1. 跑 `go vet ./...` 与 `go test ./...`；
+2. 在 Ubuntu 上编 Linux 与 Windows 目标，在 macOS 上编 macOS 目标（这样 `.app` 才有图标与 ad hoc 签名）；
+3. 把 6 个 `mytools-<版本>-<os>-<arch>.tar.gz` 作为工作流产物上传，并在 Releases 里建一版附上它们。
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+只想试一次、不建 Release：在仓库的 Actions 页选 Release → Run workflow，版本号留空就取标签或 `git describe`。标签要在推送后才会触发；`dist/` 已被忽略，本地构建不进仓库。
+
 ## 截图
 
 **JSON 美化**：树形高亮、可折叠；`Cmd/Ctrl+F` 查找，点名字、点值、点空白各复制各的

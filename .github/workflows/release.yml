@@ -1,0 +1,93 @@
+name: Release
+
+# 打一个 v 开头的标签，就在 GitHub 的 Releases 里放上各平台的压缩包；
+# 在 Actions 页手动运行，只留工作流产物，不建 Release。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（留空则取标签或 git describe）'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS 的 .app 在 macOS 上打包，才有图标与 ad hoc 签名；
+          # 其余目标在 Linux 上交叉编译（mygo 不用 cgo）。
+          - runner: ubuntu-latest
+            platforms: linux/amd64,linux/arm64,windows/amd64,windows/arm64
+          - runner: macos-latest
+            platforms: darwin/amd64,darwin/arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Work out the version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          v="$INPUT_VERSION"
+          if [ -z "$v" ]; then
+            if [ "${{ github.ref_type }}" = "tag" ]; then
+              v="${GITHUB_REF_NAME#v}"
+            else
+              v="$(git describe --tags --always --dirty 2>/dev/null || echo 0.1.0)"
+              v="${v#v}"
+            fi
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "building $v"
+      - name: Build
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PLATFORMS: ${{ matrix.platforms }}
+        run: sh scripts/build.sh -v "$VERSION" -p "$PLATFORMS"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mytools-${{ matrix.runner }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Show what is going out
+        run: ls -l artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.tar.gz
+          generate_release_notes: true
