@@ -31,6 +31,12 @@ type App struct {
 	shotTool *tools.Screenshot
 	shots    *shots.Service
 	tray     *mygo.Tray
+	trayMenu *mygo.Menu // the menu a right click pops on a Mac
+
+	// quitting lets the window close when the program is on its way out;
+	// otherwise a close only puts it away.
+	quitting bool
+	quitApp  func() // mygo.App.Quit, which a test may watch instead
 
 	// themeMode is "light", "dark" or "system", and zoom how much larger
 	// than usual the pages are drawn: the appearance the user chose.
