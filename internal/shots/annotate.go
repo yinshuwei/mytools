@@ -17,6 +17,7 @@ type Tool uint8
 const (
 	ToolSelect Tool = iota
 	ToolRect
+	ToolEllipse
 	ToolArrow
 	ToolPen
 	ToolText
@@ -24,7 +25,7 @@ const (
 )
 
 // Names are the tools as the toolbar shows them.
-var Names = []string{"选择", "矩形", "箭头", "画笔", "文字", "马赛克"}
+var Names = []string{"选择", "矩形", "圆圈", "箭头", "画笔", "文字", "马赛克"}
 
 // A Shape is one annotation, in the picture's own pixels: what is saved is
 // the picture's resolution, whatever size the window shows it at.
@@ -33,8 +34,8 @@ type Shape struct {
 	Color color.RGBA
 	// Width is the stroke in pixels; for a mosaic, the size of one block.
 	Width float32
-	// Rect is what a rectangle and a mosaic cover; From and To are the ends
-	// of an arrow; Points are a pen's path.
+	// Rect is what a rectangle, a circle and a mosaic cover; From and To
+	// are the ends of an arrow; Points are a pen's path.
 	Rect   image.Rectangle
 	From   image.Point
 	To     image.Point
@@ -50,13 +51,14 @@ type Shape struct {
 func (s Shape) Bounds() image.Rectangle {
 	half := int(s.Width / 2)
 	switch s.Tool {
-	case ToolRect, ToolMosaic:
+	case ToolRect, ToolEllipse, ToolMosaic:
 		return s.Rect.Inset(-half)
 	case ToolArrow:
+		// The head is wider than the stroke, so the box takes its width.
 		return image.Rect(
 			min(s.From.X, s.To.X), min(s.From.Y, s.To.Y),
 			max(s.From.X, s.To.X), max(s.From.Y, s.To.Y),
-		).Inset(-half)
+		).Inset(-int(arrowHeadW(s.Width) / 2))
 	case ToolPen:
 		if len(s.Points) == 0 {
 			return image.Rectangle{}
@@ -82,8 +84,21 @@ func (s Shape) Hit(pt image.Point, tol float32) bool {
 		// The inside counts as well: a rectangle is easier to take by
 		// what it frames than by its 2-pixel outline.
 		return pt.In(s.Rect.Inset(-int(tol)))
+	case ToolEllipse:
+		// A ring is taken by what it circles, as a rectangle is.
+		rx, ry := float64(s.Rect.Dx())/2+float64(tol), float64(s.Rect.Dy())/2+float64(tol)
+		if rx <= 0 || ry <= 0 {
+			return false
+		}
+		dx := float64(pt.X) - (float64(s.Rect.Min.X) + float64(s.Rect.Dx())/2)
+		dy := float64(pt.Y) - (float64(s.Rect.Min.Y) + float64(s.Rect.Dy())/2)
+		return (dx*dx)/(rx*rx)+(dy*dy)/(ry*ry) <= 1
 	case ToolArrow:
-		return distToSegment(pt, s.From, s.To) <= reach
+		if distToSegment(pt, s.From, s.To) <= reach {
+			return true
+		}
+		// The head is a triangle at the tip, wider than the stroke.
+		return dist(pt, s.To) <= float64(tol+arrowHeadW(s.Width)/2)
 	case ToolPen:
 		if len(s.Points) == 1 {
 			return dist(pt, s.Points[0]) <= reach
@@ -104,7 +119,7 @@ func (s Shape) Hit(pt image.Point, tol float32) bool {
 func (s Shape) Moved(dx, dy int) Shape {
 	d := image.Pt(dx, dy)
 	switch s.Tool {
-	case ToolRect, ToolMosaic:
+	case ToolRect, ToolEllipse, ToolMosaic:
 		s.Rect = s.Rect.Add(d)
 	case ToolArrow:
 		s.From, s.To = s.From.Add(d), s.To.Add(d)
@@ -173,6 +188,8 @@ func (s Shape) draw(p *ui.Painter, ox, oy, k float32, src image.Image) {
 	switch s.Tool {
 	case ToolRect:
 		p.Stroke(rectAt(s.Rect, ox, oy, k), col, 0, width)
+	case ToolEllipse:
+		s.drawEllipse(p, ox, oy, k, width, col)
 	case ToolArrow:
 		s.drawArrow(p, ox, oy, k, width, col)
 	case ToolPen:
@@ -184,18 +201,90 @@ func (s Shape) draw(p *ui.Painter, ox, oy, k float32, src image.Image) {
 	}
 }
 
+// drawArrow paints an arrow that swells from a thin tail to a wide head, as
+// the ones a phone's screenshot tool draws: the shaft thickens along its
+// length, and the head is a solid triangle.
 func (s Shape) drawArrow(p *ui.Painter, ox, oy, k, width float32, col ui.Color) {
 	x0, y0 := ox+float32(s.From.X)*k, oy+float32(s.From.Y)*k
 	x1, y1 := ox+float32(s.To.X)*k, oy+float32(s.To.Y)*k
-	stroke(p, x0, y0, x1, y1, width, col)
-	ang := math.Atan2(float64(y1-y0), float64(x1-x0))
-	head := max(10*k, 3.2*width)
-	// Two strokes back from the tip, as the barbs of an arrow.
-	for _, d := range []float64{ang + math.Pi - 0.55, ang + math.Pi + 0.55} {
-		stroke(p, x1, y1,
-			x1+float32(math.Cos(d))*head,
-			y1+float32(math.Sin(d))*head, width, col)
+	dx, dy := x1-x0, y1-y0
+	length := float32(math.Hypot(float64(dx), float64(dy)))
+	if length < 2 {
+		return
 	}
+	deg := float32(math.Atan2(float64(dy), float64(dx)) * 180 / math.Pi)
+
+	w := max(width, 1)
+	// The head is a triangle a few strokes wide and a little longer than
+	// that; the shaft runs into it, so that the two read as one.
+	headW := min(arrowHeadW(w), length)
+	head := min(headW*1.3, length*0.6)
+	tail, neck := max(w*0.42, 1), max(headW*0.36, 1.2)
+	shaft := length - head*0.75
+
+	p.Transform(ui.Rotation(deg), x0, y0, func() {
+		taper(p, col, x0, y0, 0, shaft, tail, neck, 1)
+		taper(p, col, x0, y0, shaft, length, headW, 0, 0.5)
+		// The tail is rounded, thin as it is.
+		p.Fill(ui.Rect{X: x0 - tail/2, Y: y0 - tail/2, W: tail, H: tail}, col, tail/2)
+	})
+}
+
+// arrowHeadW is how wide the head of an arrow whose stroke is w DIPs is.
+func arrowHeadW(w float32) float32 { return max(w*4.5, 12) }
+
+// taper fills a stretch of the axis that starts at (x0, y0), turned to the
+// shaft, from width w0 at t0 to w1 at t1. The painter draws rectangles, so a
+// wedge is a stack of them: each piece is a hair wider than the last, and
+// they overlap a little, so that the sides come out straight.
+func taper(p *ui.Painter, col ui.Color, x0, y0, t0, t1, w0, w1, step float32) {
+	if t1 <= t0 {
+		return
+	}
+	steps := max(int((t1-t0)/step), 1)
+	for i := 0; i < steps; i++ {
+		a := t0 + (t1-t0)*float32(i)/float32(steps)
+		b := t0 + (t1-t0)*float32(i+1)/float32(steps)
+		w := max(w0+(w1-w0)*(float32(i)+0.5)/float32(steps), 0.6)
+		p.Fill(ui.Rect{X: x0 + a, Y: y0 - w/2, W: b - a + 0.75, H: w}, col, 0)
+	}
+}
+
+// drawEllipse strokes the ring inside the shape's box: a circle, or an oval
+// as wide as the box is. The painter has no curves of its own, so the ring is
+// a run of short segments.
+func (s Shape) drawEllipse(p *ui.Painter, ox, oy, k, width float32, col ui.Color) {
+	r := rectAt(s.Rect, ox, oy, k)
+	cx, cy := r.X+r.W/2, r.Y+r.H/2
+	rx, ry := r.W/2, r.H/2
+	if rx < 0.75 || ry < 0.75 {
+		return
+	}
+	// Pieces of about a DIP and a half: enough that no corner of the ring
+	// shows, and few enough to keep a drag that is making one smooth.
+	n := min(max(int((rx+ry)*math.Pi/0.75), 36), 720)
+	prevX, prevY := cx+rx, cy
+	for i := 1; i <= n; i++ {
+		a := 2 * math.Pi * float64(i) / float64(n)
+		x, y := cx+rx*float32(math.Cos(a)), cy+ry*float32(math.Sin(a))
+		bar(p, prevX, prevY, x, y, width, col)
+		prevX, prevY = x, y
+	}
+}
+
+// bar draws a straight piece of a ring: a rectangle turned to the line, with
+// flat ends, so that the pieces of a curve join into a smooth edge.
+func bar(p *ui.Painter, x0, y0, x1, y1, width float32, col ui.Color) {
+	dx, dy := x1-x0, y1-y0
+	length := float32(math.Hypot(float64(dx), float64(dy)))
+	if length < 0.01 {
+		return
+	}
+	deg := float32(math.Atan2(float64(dy), float64(dx)) * 180 / math.Pi)
+	p.Transform(ui.Rotation(deg), x0, y0, func() {
+		// A hair of overlap at both ends, so that no seam shows at a joint.
+		p.Fill(ui.Rect{X: x0 - 0.4, Y: y0 - width/2, W: length + 0.8, H: width}, col, 0)
+	})
 }
 
 // stroke draws a line of any direction: Painter.Line goes only along an axis,

@@ -183,6 +183,255 @@ func TestShotTextFloats(t *testing.T) {
 	if s.typing {
 		t.Error("Enter 后还在输入")
 	}
+	if s.tool != shots.ToolSelect {
+		t.Errorf("放下文字后工具 = %v，want 选择", shots.Names[s.tool])
+	}
+}
+
+// TestShotLayersPanel checks the panel beside the picture: the shape drawn
+// last at the top, the arrows that move a shape over and under the others,
+// and the × that deletes it.
+func TestShotLayersPanel(t *testing.T) {
+	s := &Screenshot{}
+	s.SetImage(image.NewRGBA(image.Rect(0, 0, 200, 150)), 1)
+	s.shapes = []shots.Shape{
+		{Tool: shots.ToolRect, Rect: image.Rect(0, 0, 20, 20)},
+		{Tool: shots.ToolArrow, From: image.Pt(0, 0), To: image.Pt(30, 30)},
+	}
+	tr := ui.NewTester(s.View, 900, 600)
+	tr.Frame()
+	if !tr.HasText("箭头") || !tr.HasText("矩形") {
+		t.Fatalf("面板里没有两行：%v", tr.Texts())
+	}
+
+	// The pointer takes a shape by its row; the rows go from the topmost,
+	// which is the one drawn last.
+	if err := tr.Click("图层 1：箭头"); err != nil {
+		t.Fatal(err)
+	}
+	if s.sel != 1 {
+		t.Errorf("点第一行后 sel = %d，want 1", s.sel)
+	}
+
+	// A press on a shape of the picture takes it, and the panel follows:
+	// the row of the rectangle is the one now lit. The point is off the
+	// arrow's line, which runs over the rectangle's corner.
+	canvas, ok := tr.Find("画布")
+	if !ok {
+		t.Fatal("没有找到画布")
+	}
+	tr.ClickAt(canvas.X+5, canvas.Y+15)
+	if s.sel != 0 {
+		t.Errorf("点画布上的矩形后 sel = %d，want 0", s.sel)
+	}
+
+	// The arrow is on top: pressing its up leaves the order alone, while
+	// the rectangle under it goes over it.
+	tr.Click("第1层：往上挪一层，盖住上面那个")
+	if s.shapes[0].Tool != shots.ToolRect || s.shapes[1].Tool != shots.ToolArrow {
+		t.Fatalf("最上层被挪动了：%v, %v", s.shapes[0].Tool, s.shapes[1].Tool)
+	}
+	if err := tr.Click("第2层：往上挪一层，盖住上面那个"); err != nil {
+		t.Fatal(err)
+	}
+	if s.shapes[0].Tool != shots.ToolArrow || s.shapes[1].Tool != shots.ToolRect {
+		t.Fatalf("上移后 = %v, %v，want 箭头在下、矩形在上",
+			s.shapes[0].Tool, s.shapes[1].Tool)
+	}
+
+	// Down puts it back under, and undo goes back to either state.
+	if err := tr.Click("第1层：往下挪一层，被下面那个盖住"); err != nil {
+		t.Fatal(err)
+	}
+	if s.shapes[0].Tool != shots.ToolRect {
+		t.Fatal("下移没有回到原位")
+	}
+	s.undo()
+	if s.shapes[0].Tool != shots.ToolArrow {
+		t.Error("撤销没有回到上移后的状态")
+	}
+
+	// The × deletes the shape of its row, and undo brings it back.
+	tr.Frame()
+	if err := tr.Click("第1层：删掉这一层"); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.shapes) != 1 || s.shapes[0].Tool != shots.ToolArrow {
+		t.Fatalf("删掉后 = %+v", s.shapes)
+	}
+	s.undo()
+	if len(s.shapes) != 2 {
+		t.Errorf("撤销删除后 = %d 个", len(s.shapes))
+	}
+}
+
+// TestShotToolAfterCommit checks that a shape leaves the pointer in the
+// select tool, on the shape just made: it is ready to be moved or deleted.
+func TestShotToolAfterCommit(t *testing.T) {
+	s := &Screenshot{
+		img:   image.NewRGBA(image.Rect(0, 0, 100, 100)),
+		k:     1,
+		scale: 1,
+		tool:  shots.ToolRect,
+		color: 0,
+		width: 3,
+	}
+	s.input(ui.InputEvent{Kind: ui.InputPointerDown, X: 10, Y: 10})
+	s.input(ui.InputEvent{Kind: ui.InputPointerMove, X: 40, Y: 40})
+	s.input(ui.InputEvent{Kind: ui.InputPointerUp, X: 40, Y: 40})
+	if len(s.shapes) != 1 || s.shapes[0].Rect != image.Rect(10, 10, 40, 40) {
+		t.Fatalf("画完 = %+v", s.shapes)
+	}
+	if s.tool != shots.ToolSelect {
+		t.Errorf("画完的工具 = %v，want 选择", shots.Names[s.tool])
+	}
+	if s.sel != 0 {
+		t.Errorf("画完选中 = %d，want 0", s.sel)
+	}
+}
+
+// TestShotEllipseByDrag checks the circle tool on the page: a drag makes one,
+// and the pointer is left in the select tool on it.
+func TestShotEllipseByDrag(t *testing.T) {
+	s := &Screenshot{}
+	s.SetImage(image.NewRGBA(image.Rect(0, 0, 300, 200)), 1)
+	tr := ui.NewTester(s.View, 900, 600)
+	tr.Frame()
+	if err := tr.Click("圆圈"); err != nil {
+		t.Fatal(err)
+	}
+	tr.Frame()
+	canvas, ok := tr.Find("画布")
+	if !ok {
+		t.Fatal("没有找到画布")
+	}
+	tr.Press(canvas.X+20, canvas.Y+20)
+	tr.Move(canvas.X+120, canvas.Y+80)
+	tr.Release(canvas.X+120, canvas.Y+80)
+	tr.Frame()
+	if len(s.shapes) != 1 || s.shapes[0].Tool != shots.ToolEllipse {
+		t.Fatalf("拖出来的 = %+v", s.shapes)
+	}
+	if got := s.shapes[0].Rect; got != image.Rect(20, 20, 120, 80) {
+		t.Errorf("圆圈框 = %v，want (20,20)-(120,80)", got)
+	}
+	if s.tool != shots.ToolSelect || s.sel != 0 {
+		t.Errorf("画完 tool=%v sel=%d，want 选择、选中新圆圈", s.tool, s.sel)
+	}
+}
+
+// TestShotNudge checks the arrow keys on the shape the pointer took: one
+// pixel at a time, ten with Shift, and undo for each step.
+func TestShotNudge(t *testing.T) {
+	s := &Screenshot{}
+	s.SetImage(image.NewRGBA(image.Rect(0, 0, 100, 100)), 1)
+	s.shapes = []shots.Shape{{Tool: shots.ToolRect, Width: 2, Rect: image.Rect(10, 10, 30, 30)}}
+	s.tool, s.sel = shots.ToolSelect, 0
+	tr := ui.NewTester(s.View, 900, 600)
+	tr.Frame()
+
+	tr.Key(0, ui.KeyRight)
+	tr.Frame()
+	if got := s.shapes[0].Rect; got.Min.X != 11 {
+		t.Errorf("→ 之后 = %v，want 左边 11", got)
+	}
+	tr.Key(ui.Shift, ui.KeyDown)
+	tr.Frame()
+	if got := s.shapes[0].Rect; got.Min.Y != 20 {
+		t.Errorf("Shift+↓ 之后 = %v，want 上边 20", got)
+	}
+	s.undo()
+	if got := s.shapes[0].Rect; got.Min.X != 11 || got.Min.Y != 10 {
+		t.Errorf("撤销后 = %v，want (11,10)", got)
+	}
+}
+
+// TestShotRecolor checks that a swatch paints the shape the pointer took, as
+// it does the pen, and that a mosaic keeps the picture's colors.
+func TestShotRecolor(t *testing.T) {
+	s := &Screenshot{}
+	s.SetImage(image.NewRGBA(image.Rect(0, 0, 100, 100)), 1)
+	s.shapes = []shots.Shape{
+		{Tool: shots.ToolRect, Color: shotColors[0].col, Width: 2, Rect: image.Rect(0, 0, 10, 10)},
+		{Tool: shots.ToolMosaic, Width: 8, Rect: image.Rect(20, 20, 40, 40)},
+	}
+	s.sel = 0
+	s.recolor(shotColors[4].col)
+	if s.shapes[0].Color != shotColors[4].col {
+		t.Errorf("改色后 = %v，want %v", s.shapes[0].Color, shotColors[4].col)
+	}
+	s.sel = 1
+	s.recolor(shotColors[4].col)
+	if s.shapes[1].Color == shotColors[4].col {
+		t.Error("马赛克被改了颜色")
+	}
+	s.undo()
+	if s.shapes[0].Color != shotColors[0].col {
+		t.Errorf("撤销后 = %v，want 原来的颜色", s.shapes[0].Color)
+	}
+}
+
+// TestShotTextSize checks the size buttons: the text the pointer took grows
+// by two DIPs a press, undo takes it back, and the next text is made at the
+// size shown.
+func TestShotTextSize(t *testing.T) {
+	s := &Screenshot{}
+	s.SetImage(image.NewRGBA(image.Rect(0, 0, 200, 100)), 1)
+	s.shapes = []shots.Shape{{Tool: shots.ToolText, Text: "字", At: image.Pt(10, 10), Size: 16}}
+	s.tool, s.sel = shots.ToolSelect, 0
+	if !s.textInHand() {
+		t.Error("选中文字时没有字号控件")
+	}
+	s.bumpText(2)
+	if s.shapes[0].Size != 18 {
+		t.Errorf("字号 = %v，want 18", s.shapes[0].Size)
+	}
+	s.undo()
+	if s.shapes[0].Size != 16 {
+		t.Errorf("撤销后字号 = %v，want 16", s.shapes[0].Size)
+	}
+
+	// A text put down afterwards is that big.
+	s.tool, s.typing, s.text, s.textAt = shots.ToolText, true, "a", image.Pt(5, 5)
+	s.textSize = 30
+	sh, ok := s.pendingShape()
+	if !ok || sh.Size != 30 {
+		t.Errorf("新文字 = %+v，%v，want 30", sh, ok)
+	}
+}
+
+// TestShotLayersReveal checks the binding the other way round: a shape taken
+// on the picture lights its row, and the panel scrolls to it even when it is
+// far down the list.
+func TestShotLayersReveal(t *testing.T) {
+	s := &Screenshot{}
+	s.SetImage(image.NewRGBA(image.Rect(0, 0, 400, 400)), 1)
+	for i := 0; i < 30; i++ {
+		s.shapes = append(s.shapes, shots.Shape{
+			Tool: shots.ToolRect, Width: 2,
+			Rect: image.Rect(5, i*10, 15, i*10+8),
+		})
+	}
+	s.tool, s.sel = shots.ToolSelect, -1
+	tr := ui.NewTester(s.View, 900, 600)
+	tr.Frame()
+	canvas, ok := tr.Find("画布")
+	if !ok {
+		t.Fatal("没有找到画布")
+	}
+	// The first drawn is the last row: the 29 made after it are over it.
+	tr.ClickAt(canvas.X+5, canvas.Y+5)
+	tr.Frame()
+	if s.sel != 0 {
+		t.Fatalf("点画布后 sel = %d，want 0", s.sel)
+	}
+	row, ok := tr.Find("图层 30：矩形")
+	if !ok {
+		t.Fatal("面板没有滚到被选中的那一行")
+	}
+	if row.Y+row.H > 600 {
+		t.Errorf("第 30 行在窗口外：%v", row)
+	}
 }
 
 // TestShotRemoveShape checks Delete: the shape the pointer took goes, and

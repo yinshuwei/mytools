@@ -15,6 +15,10 @@ import (
 	"github.com/yinshuwei/mytools/internal/widgets"
 )
 
+// defaultTextSize is how big a text is put down, in DIPs, until the page is
+// told otherwise.
+const defaultTextSize = 16
+
 // shotColors are the pens the page offers, in the order of the swatches.
 var shotColors = []struct {
 	name string
@@ -60,9 +64,10 @@ type Screenshot struct {
 	past   [][]shots.Shape
 	future [][]shots.Shape
 
-	tool  shots.Tool
-	color int     // index into shotColors
-	width float64 // stroke, in DIPs
+	tool     shots.Tool
+	color    int     // index into shotColors
+	width    float64 // stroke, in DIPs
+	textSize float64 // how big a text is, in DIPs
 
 	drawing bool
 	start   image.Point
@@ -70,10 +75,12 @@ type Screenshot struct {
 	pen     []image.Point
 
 	// The shape the pointer took, and where it was taken from: dragging it
-	// moves it.
+	// moves it. reveal asks the layers panel to scroll the row of a shape
+	// taken on the picture into view.
 	sel      int
 	moving   bool
 	moved    bool
+	reveal   bool
 	moveFrom image.Point
 	moveBase shots.Shape
 
@@ -125,6 +132,9 @@ func (s *Screenshot) SetImage(img *image.RGBA, scale float64) {
 	if s.width <= 0 {
 		s.width = 3
 	}
+	if s.textSize <= 0 {
+		s.textSize = defaultTextSize
+	}
 	s.shapes, s.past, s.future = nil, nil, nil
 	s.sel = -1
 	s.drawing, s.typing, s.text = false, false, ""
@@ -152,7 +162,10 @@ func (s *Screenshot) View(c *ui.Context) {
 		ui.Column(c).FillWidth().MaxWidth(PageWidth).Gap(10).Children(func() {
 			s.toolbar(c, t)
 		})
-		s.canvasView(c)
+		ui.Row(c).FillWidth().Grow(1).Gap(10).AlignItems(ui.Stretch).Children(func() {
+			s.canvasView(c)
+			s.layers(c, t)
+		})
 		s.status(c)
 	})
 }
@@ -182,7 +195,7 @@ func (s *Screenshot) landing(c *ui.Context, t *ui.Theme) {
 		ui.Divider(c)
 		ui.Text(c, "拖动鼠标框选一块区域，然后按 Enter。").
 			FontSize(widgets.Scaled(13))
-		ui.Text(c, "图片会回到这里，可以画矩形、箭头、画笔、文字和马赛克，再复制或保存。").
+		ui.Text(c, "图片会回到这里，可以画矩形、圆圈、箭头、画笔、文字和马赛克，再复制或保存。").
 			FontSize(widgets.Scaled(12)).TextColor(t.TextMuted)
 		if runtime.GOOS == "darwin" {
 			ui.Text(c, "第一次使用需要在系统设置 → 隐私与安全性 → 屏幕录制里允许本应用，然后重新启动它。").
@@ -223,9 +236,30 @@ func (s *Screenshot) shortcuts(c *ui.Context) {
 			s.clear()
 		}
 	}
-	if s.tool == shots.ToolSelect && s.sel >= 0 &&
-		(c.Shortcut(0, ui.KeyDelete) || c.Shortcut(0, ui.KeyBackspace)) {
+	if s.sel >= 0 && (c.Shortcut(0, ui.KeyDelete) || c.Shortcut(0, ui.KeyBackspace)) {
 		s.removeSel()
+	}
+	// The arrows step the shape the pointer took: a pixel at a time, or ten
+	// with Shift held, as a picture is nudged pixel by pixel.
+	if s.sel >= 0 {
+		switch {
+		case c.Shortcut(0, ui.KeyLeft):
+			s.nudge(-1, 0)
+		case c.Shortcut(ui.Shift, ui.KeyLeft):
+			s.nudge(-10, 0)
+		case c.Shortcut(0, ui.KeyRight):
+			s.nudge(1, 0)
+		case c.Shortcut(ui.Shift, ui.KeyRight):
+			s.nudge(10, 0)
+		case c.Shortcut(0, ui.KeyUp):
+			s.nudge(0, -1)
+		case c.Shortcut(ui.Shift, ui.KeyUp):
+			s.nudge(0, -10)
+		case c.Shortcut(0, ui.KeyDown):
+			s.nudge(0, 1)
+		case c.Shortcut(ui.Shift, ui.KeyDown):
+			s.nudge(0, 10)
+		}
 	}
 }
 
@@ -269,11 +303,15 @@ func (s *Screenshot) toolbar(c *ui.Context, t *ui.Theme) {
 			}
 			if sw.Clicked() {
 				s.color = i
+				s.recolor(shotColors[i].col)
 			}
 		}
 		widgets.Hint(c, "线宽")
 		ui.Slider(c.Key("width"), &s.width, 1, 10).Width(widgets.Scaled(90)).
 			Label("线宽").Tooltip("画出来有多粗，以屏幕上的 DIP 计")
+		if s.textInHand() {
+			s.textSizeControl(c, t)
+		}
 		ui.Spacer(c)
 		if ui.PrimaryButton(c.Key("copy"), "复制").
 			Tooltip("复制标注后的图片（" + widgets.ShortcutHint(0, "C") + "）").Clicked() {
@@ -284,6 +322,110 @@ func (s *Screenshot) toolbar(c *ui.Context, t *ui.Theme) {
 			s.saveImage(c)
 		}
 	})
+}
+
+// textInHand says whether the text size is worth showing: a text is being
+// typed, or one is taken.
+func (s *Screenshot) textInHand() bool {
+	if s.tool == shots.ToolText {
+		return true
+	}
+	return s.sel >= 0 && s.sel < len(s.shapes) && s.shapes[s.sel].Tool == shots.ToolText
+}
+
+// textSizeControl is the pair of buttons that make a text bigger or smaller:
+// the one taken, and the ones made from now on.
+func (s *Screenshot) textSizeControl(c *ui.Context, t *ui.Theme) {
+	widgets.Hint(c, "字号")
+	if layerButton(c, t, "sizesmall", "−", "字号小一号", true) {
+		s.bumpText(-2)
+	}
+	ui.Text(c, strconv.Itoa(int(s.textDIP()))).FontSize(widgets.Scaled(12)).
+		TextColor(t.Text)
+	if layerButton(c, t, "sizebig", "+", "字号大一号", true) {
+		s.bumpText(2)
+	}
+}
+
+// bumpText makes a text bigger or smaller by d DIPs: the one taken if it is
+// a text, and the ones made from now on.
+func (s *Screenshot) bumpText(d int) {
+	size := min(max(s.textDIP()+float64(d), 8), 96)
+	s.textSize = size
+	if s.sel >= 0 && s.sel < len(s.shapes) && s.shapes[s.sel].Tool == shots.ToolText {
+		s.keep()
+		s.shapes[s.sel].Size = float32(size) * float32(s.scale)
+	}
+}
+
+// textDIP is how big a text is, in DIPs.
+func (s *Screenshot) textDIP() float64 {
+	if s.textSize <= 0 {
+		return defaultTextSize
+	}
+	return s.textSize
+}
+
+// recolor paints the shape the pointer took in col, as the swatches do: a
+// mosaic has no pen of its own.
+func (s *Screenshot) recolor(col color.RGBA) {
+	if s.sel < 0 || s.sel >= len(s.shapes) {
+		return
+	}
+	sh := s.shapes[s.sel]
+	if sh.Tool == shots.ToolMosaic || sh.Color == col {
+		return
+	}
+	s.keep()
+	s.shapes[s.sel].Color = col
+}
+
+// took points the pointer at the shape at i, and the toolbar at what it
+// looks like: the pen it was drawn with, and the size of its text.
+func (s *Screenshot) took(i int) {
+	s.sel = i
+	if i < 0 || i >= len(s.shapes) {
+		return
+	}
+	sh := s.shapes[i]
+	for j, pen := range shotColors {
+		if pen.col == sh.Color {
+			s.color = j
+			break
+		}
+	}
+	if sh.Tool == shots.ToolText && s.scale > 0 {
+		s.textSize = float64(sh.Size) / s.scale
+	}
+}
+
+// nudge steps the shape the pointer took by a few pixels, as the arrow keys
+// do.
+func (s *Screenshot) nudge(dx, dy int) {
+	if s.sel < 0 || s.sel >= len(s.shapes) || s.img == nil {
+		return
+	}
+	sh := s.shapes[s.sel]
+	dx, dy = clampMove(sh, s.img.Bounds(), dx, dy)
+	if dx == 0 && dy == 0 {
+		return
+	}
+	s.keep()
+	s.shapes[s.sel] = sh.Moved(dx, dy)
+}
+
+// clampMove keeps a shape that moves by dx, dy over the picture.
+func clampMove(sh shots.Shape, frame image.Rectangle, dx, dy int) (int, int) {
+	b := sh.Bounds()
+	loX, hiX := frame.Min.X-b.Min.X, frame.Max.X-b.Max.X
+	if loX > hiX {
+		loX, hiX = hiX, loX
+	}
+	loY, hiY := frame.Min.Y-b.Min.Y, frame.Max.Y-b.Max.Y
+	if loY > hiY {
+		loY, hiY = hiY, loY
+	}
+	return min(max(dx, loX), hiX), min(max(dy, loY), hiY)
 }
 
 // textEditor floats where the text is being typed, over the picture: a field
@@ -353,7 +495,7 @@ func (s *Screenshot) canvasView(c *ui.Context) {
 	b := s.img.Bounds()
 	w := float32(b.Dx()) * s.k
 	h := float32(b.Dy()) * s.k
-	ui.ScrollBoth(c.Key("scroll")).FillWidth().Grow(1).
+	ui.ScrollBoth(c.Key("scroll")).Grow(1).Shrink(1).
 		Background(t.SurfaceHover).Border(1, t.Border).Radius(widgets.Scaled(8)).
 		Children(func() {
 			ui.Column(c).Padding(widgets.Scaled(12)).Children(func() {
@@ -368,11 +510,174 @@ func (s *Screenshot) canvasView(c *ui.Context) {
 		})
 }
 
+// layers is the panel beside the picture: one row per annotation, the one
+// drawn last at the top, to take it, to move it over the others or under
+// them, and to delete it.
+func (s *Screenshot) layers(c *ui.Context, t *ui.Theme) {
+	ui.Column(c).Width(widgets.Scaled(190)).Shrink(0).Gap(6).
+		Background(t.Surface).Border(1, t.Border).Radius(widgets.Scaled(8)).
+		Padding(widgets.Scaled(8)).
+		Children(func() {
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				widgets.Caption(c, "图层")
+				ui.Spacer(c)
+				widgets.Hint(c, strconv.Itoa(len(s.shapes))+" 层")
+			})
+			if len(s.shapes) == 0 {
+				widgets.Hint(c, "还没有标注")
+				return
+			}
+			// What a press asks for is taken once the rows are all built:
+			// a shape that goes as the others are drawn would leave them
+			// naming the wrong rows.
+			act := layerAct{i: -1}
+			ui.Scroll(c.Key("layers")).Grow(1).Children(func() {
+				for i := len(s.shapes) - 1; i >= 0; i-- {
+					s.layerRow(c, t, i, &act)
+				}
+			})
+			act.apply(s)
+		})
+}
+
+// layerAct is what a press on a row asks for: "up", "down" or "delete".
+type layerAct struct {
+	op string
+	i  int
+}
+
+func (a layerAct) apply(s *Screenshot) {
+	switch a.op {
+	case "up":
+		s.moveLayer(a.i, 1)
+	case "down":
+		s.moveLayer(a.i, -1)
+	case "delete":
+		s.removeShape(a.i)
+	}
+}
+
+// layerRow is one annotation in the panel: its color and name, and the
+// buttons that move it and delete it. A press on the row takes the shape.
+func (s *Screenshot) layerRow(c *ui.Context, t *ui.Theme, i int, act *layerAct) {
+	sh := s.shapes[i]
+	// Rows are numbered as they are seen, from the top down, though the
+	// shapes are kept the other way round.
+	n := len(s.shapes) - i
+	row := ui.Box(c.Key("layer"+strconv.Itoa(i))).FillWidth().Padding(3, 6).
+		Radius(widgets.Scaled(4)).Cursor(ui.CursorPointer).
+		Label("图层 " + strconv.Itoa(n) + "：" + layerName(sh))
+	switch {
+	case i == s.sel:
+		row.Background(t.SurfaceHover).Border(1, t.Accent)
+	case row.Hovered():
+		row.Background(t.SurfaceHover)
+	}
+	row.Children(func() {
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			dot := ui.RGB(sh.Color.R, sh.Color.G, sh.Color.B)
+			if sh.Tool == shots.ToolMosaic {
+				// A mosaic has no pen of its own: it takes the picture's
+				// colors.
+				dot = t.Border
+			}
+			ui.Box(c).Size(widgets.Scaled(10), widgets.Scaled(10)).Shrink(0).
+				Radius(widgets.Scaled(2)).Background(dot)
+			ui.Text(c, layerName(sh)).FontSize(widgets.Scaled(12)).
+				TextColor(t.Text).SingleLine().Grow(1)
+			at := "第" + strconv.Itoa(n) + "层："
+			if layerButton(c, t, "up"+strconv.Itoa(i), "↑", at+"往上挪一层，盖住上面那个",
+				i < len(s.shapes)-1) {
+				act.op, act.i = "up", i
+			}
+			if layerButton(c, t, "down"+strconv.Itoa(i), "↓", at+"往下挪一层，被下面那个盖住",
+				i > 0) {
+				act.op, act.i = "down", i
+			}
+			if layerButton(c, t, "del"+strconv.Itoa(i), "×", at+"删掉这一层", true) {
+				act.op, act.i = "delete", i
+			}
+		})
+	})
+	if row.Clicked() {
+		s.took(i)
+		s.reveal = false
+	}
+	if i == s.sel && s.reveal {
+		// A shape taken on the picture brings its row into view, once: the
+		// panel is left where a hand scrolls it.
+		s.reveal = false
+		row.ScrollIntoView()
+	}
+}
+
+// layerButton is one of the small buttons on a row: up, down, or the × that
+// deletes the shape.
+func layerButton(c *ui.Context, t *ui.Theme, key, glyph, tip string, on bool) bool {
+	b := ui.ButtonBase(c.Key(key)).Size(widgets.Scaled(18), widgets.Scaled(18)).
+		Radius(widgets.Scaled(3)).Shrink(0).Label(tip).Tooltip(tip)
+	if !on {
+		b.Disabled(true)
+	} else if b.Hovered() {
+		b.Background(t.SurfaceHover)
+	}
+	b.Children(func() {
+		col := t.TextMuted
+		if on {
+			col = t.Text
+		}
+		ui.Text(c, glyph).FontSize(widgets.Scaled(11)).TextColor(col)
+	})
+	return on && b.Clicked()
+}
+
+// layerName is what a row says about a shape: its tool, and the words of a
+// text.
+func layerName(sh shots.Shape) string {
+	name := "标注"
+	if int(sh.Tool) < len(shots.Names) {
+		name = shots.Names[sh.Tool]
+	}
+	if sh.Tool == shots.ToolText {
+		if words := strings.TrimSpace(sh.Text); words != "" {
+			return name + " · " + words
+		}
+	}
+	return name
+}
+
+// moveLayer swaps a shape with the one beside it: by +1 is over the shape
+// drawn after it, which is over it on the picture.
+func (s *Screenshot) moveLayer(i, by int) {
+	j := i + by
+	if i < 0 || i >= len(s.shapes) || j < 0 || j >= len(s.shapes) {
+		return
+	}
+	s.keep()
+	s.shapes[i], s.shapes[j] = s.shapes[j], s.shapes[i]
+	s.sel = j
+}
+
+// removeShape deletes the shape at i, and keeps the pointer on what it took.
+func (s *Screenshot) removeShape(i int) {
+	if i < 0 || i >= len(s.shapes) {
+		return
+	}
+	s.keep()
+	s.shapes = append(s.shapes[:i], s.shapes[i+1:]...)
+	switch {
+	case s.sel == i:
+		s.sel = -1
+	case s.sel > i:
+		s.sel--
+	}
+}
+
 func (s *Screenshot) status(c *ui.Context) {
 	ui.Row(c).Gap(12).Wrap().AlignItems(ui.Center).Children(func() {
 		widgets.Hint(c, fmt.Sprintf("%d × %d 像素", s.img.Bounds().Dx(), s.img.Bounds().Dy()))
-		widgets.Hint(c, "拖动绘制 · 选择工具拖动标注可移动，Delete 删除 · "+
-			widgets.ShortcutHint(0, "Z")+" 撤销 · "+
+		widgets.Hint(c, "拖动绘制 · 选择工具拖动标注可移动，方向键微调（按住 Shift 一次 10 像素），"+
+			"Delete 删除 · "+widgets.ShortcutHint(0, "Z")+" 撤销 · "+
 			widgets.ShortcutHint(0, "C")+" 复制 · "+widgets.ShortcutHint(0, "S")+" 保存")
 	})
 }
@@ -390,7 +695,7 @@ func (s *Screenshot) draw(p *ui.Painter, r ui.Rect) {
 	}
 	// The shape the pointer took is ringed, so that a drag has something to
 	// hold on to; what is saved has no ring.
-	if s.tool == shots.ToolSelect && s.sel >= 0 && s.sel < len(s.shapes) {
+	if s.sel >= 0 && s.sel < len(s.shapes) {
 		b := s.shapes[s.sel].Bounds()
 		ring := ui.Rect{
 			X: r.X + float32(b.Min.X)*s.k, Y: r.Y + float32(b.Min.Y)*s.k,
@@ -432,6 +737,8 @@ func (s *Screenshot) input(ev ui.InputEvent) bool {
 			s.textAt, s.text, s.typing, s.focusText = pt, "", true, true
 			return true
 		}
+		// Drawing over the picture puts the shape the panel took aside.
+		s.sel = -1
 		s.drawing = true
 		s.start, s.cur = pt, pt
 		s.pen = []image.Point{pt}
@@ -483,7 +790,7 @@ func (s *Screenshot) pendingShape() (shots.Shape, bool) {
 	col := shotColors[s.color].col
 	width := float32(s.width) * float32(s.scale)
 	switch s.tool {
-	case shots.ToolRect, shots.ToolMosaic:
+	case shots.ToolRect, shots.ToolEllipse, shots.ToolMosaic:
 		if !s.drawing {
 			return shots.Shape{}, false
 		}
@@ -516,19 +823,20 @@ func (s *Screenshot) pendingShape() (shots.Shape, bool) {
 			return shots.Shape{}, false
 		}
 		return shots.Shape{Tool: shots.ToolText, Color: col, At: s.textAt,
-			Text: s.text, Size: 16 * float32(s.scale)}, true
+			Text: s.text, Size: float32(s.textDIP()) * float32(s.scale)}, true
 	}
 	return shots.Shape{}, false
 }
 
 // grab takes the topmost shape under pt, if any, to be dragged: what comes
-// last is what the eye sees on top.
+// last is what the eye sees on top. The panel follows it to the same shape.
 func (s *Screenshot) grab(pt image.Point) {
-	s.sel = s.shapeAt(pt)
+	s.took(s.shapeAt(pt))
 	if s.sel < 0 {
 		s.moving = false
 		return
 	}
+	s.reveal = true
 	s.moving, s.moved = true, false
 	s.moveFrom, s.moveBase = pt, s.shapes[s.sel]
 }
@@ -555,16 +863,7 @@ func (s *Screenshot) dragSelection(x, y float32) {
 		return
 	}
 	// The shape stays over the picture, however far the drag goes.
-	b, frame := s.moveBase.Bounds(), s.img.Bounds()
-	loX, hiX := frame.Min.X-b.Min.X, frame.Max.X-b.Max.X
-	if loX > hiX {
-		loX, hiX = hiX, loX
-	}
-	loY, hiY := frame.Min.Y-b.Min.Y, frame.Max.Y-b.Max.Y
-	if loY > hiY {
-		loY, hiY = hiY, loY
-	}
-	dx, dy = min(max(dx, loX), hiX), min(max(dy, loY), hiY)
+	dx, dy = clampMove(s.moveBase, s.img.Bounds(), dx, dy)
 	if !s.moved {
 		// The state as the drag began, shape where it lay: undo goes back
 		// to it.
@@ -577,9 +876,14 @@ func (s *Screenshot) dragSelection(x, y float32) {
 	s.shapes[s.sel] = s.moveBase.Moved(dx, dy)
 }
 
+// commit adds the shape that was just made and takes the pointer to it: what
+// comes next is moving it, deleting it, or drawing another, and the tool for
+// the first two is the one that takes it.
 func (s *Screenshot) commit(sh shots.Shape) {
 	s.keep()
 	s.shapes = append(s.shapes, sh)
+	s.tool = shots.ToolSelect
+	s.sel = len(s.shapes) - 1
 }
 
 func (s *Screenshot) commitText() {
@@ -632,13 +936,8 @@ func (s *Screenshot) afterHistory() {
 
 // removeSel deletes the shape the pointer took, as Delete does.
 func (s *Screenshot) removeSel() {
-	if s.sel < 0 || s.sel >= len(s.shapes) {
-		return
-	}
-	s.keep()
-	s.shapes = append(s.shapes[:s.sel], s.shapes[s.sel+1:]...)
-	if s.sel >= len(s.shapes) {
-		s.sel = -1
+	if s.sel >= 0 {
+		s.removeShape(s.sel)
 	}
 }
 

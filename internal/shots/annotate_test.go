@@ -38,6 +38,14 @@ func TestShapeHit(t *testing.T) {
 		t.Error("箭头的框里、线外也点中了")
 	}
 
+	ring := Shape{Tool: ToolEllipse, Width: 2, Rect: image.Rect(0, 0, 100, 60)}
+	if !ring.Hit(image.Pt(50, 30), 0) {
+		t.Error("圆圈里面没点中")
+	}
+	if ring.Hit(image.Pt(5, 5), 0) {
+		t.Error("圆圈外的角落也点中了")
+	}
+
 	pen := Shape{Tool: ToolPen, Width: 4, Points: []image.Point{{0, 0}, {50, 0}, {50, 50}}}
 	if !pen.Hit(image.Pt(25, 2), 1) {
 		t.Error("画笔线上没点中")
@@ -65,6 +73,10 @@ func TestShapeMoved(t *testing.T) {
 	arrow := Shape{Tool: ToolArrow, From: image.Pt(0, 0), To: image.Pt(5, 5)}.Moved(1, 2)
 	if arrow.From != image.Pt(1, 2) || arrow.To != image.Pt(6, 7) {
 		t.Errorf("箭头移动后 = %v → %v", arrow.From, arrow.To)
+	}
+	ring := Shape{Tool: ToolEllipse, Rect: image.Rect(0, 0, 10, 6)}.Moved(2, 3)
+	if ring.Rect != image.Rect(2, 3, 12, 9) {
+		t.Errorf("圆圈移动后 = %v", ring.Rect)
 	}
 	text := Shape{Tool: ToolText, At: image.Pt(3, 4)}.Moved(1, 1)
 	if text.At != image.Pt(4, 5) {
@@ -126,6 +138,59 @@ func TestRasterizeCrop(t *testing.T) {
 	}
 	if !red {
 		t.Error("裁剪后矩形没有跟着移位")
+	}
+}
+
+// TestArrowTapers checks the arrow's shape in the picture: thin at the tail,
+// wider along the shaft, and widest in the head at the tip.
+func TestArrowTapers(t *testing.T) {
+	src := bluePicture(220, 100)
+	out := Rasterize(src, src.Bounds(), []Shape{{
+		Tool: ToolArrow, Color: color.RGBA{R: 255, A: 255}, Width: 3,
+		From: image.Pt(10, 50), To: image.Pt(200, 50),
+	}})
+	// How thick the arrow is at a column: the red pixels down it.
+	thick := func(x int) int {
+		n := 0
+		for y := 0; y < 100; y++ {
+			if c := out.RGBAAt(x, y); c.R > 200 && c.B < 80 {
+				n++
+			}
+		}
+		return n
+	}
+	tail, mid, head := thick(20), thick(120), thick(190)
+	if tail >= mid {
+		t.Errorf("尾端 %d 像素粗，中段 %d，尾部没有更细", tail, mid)
+	}
+	if head <= mid {
+		t.Errorf("箭头处 %d 像素粗，中段 %d，箭头没有更宽", head, mid)
+	}
+	if tail < 1 {
+		t.Error("尾端没有画上")
+	}
+}
+
+// TestRasterizeEllipse checks that a circle is a ring: the picture shows
+// through the middle, and the ring runs through the middle of each side of
+// the box it was dragged over.
+func TestRasterizeEllipse(t *testing.T) {
+	src := bluePicture(120, 80)
+	out := Rasterize(src, src.Bounds(), []Shape{{
+		Tool: ToolEllipse, Color: color.RGBA{R: 255, A: 255}, Width: 3,
+		Rect: image.Rect(20, 10, 100, 70),
+	}})
+	red := func(x, y int) bool {
+		c := out.RGBAAt(x, y)
+		return c.R > 200 && c.B < 80
+	}
+	if red(60, 40) {
+		t.Error("圆圈中间被涂实了")
+	}
+	for _, pt := range []image.Point{{60, 10}, {60, 70}, {20, 40}, {100, 40}} {
+		if !red(pt.X, pt.Y) {
+			t.Errorf("%v 处没有画上圆边", pt)
+		}
 	}
 }
 
