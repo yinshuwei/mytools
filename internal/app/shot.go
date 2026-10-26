@@ -50,19 +50,11 @@ func (a *App) SetupDesktop() {
 	a.shots.Deliver = a.editShot
 	if a.shotTool != nil {
 		a.shotTool.Shot = a.TakeShot
-		a.shotTool.Hotkey = shotHotkeyText()
 		if err := a.shots.Problem(); err != nil {
 			a.shotTool.Problem = shots.Friendly(err)
 		}
-		if err := mygo.GlobalShortcut.Register(shotAccelerator(), a.TakeShot); err != nil {
-			log.Printf("全局快捷键 %s 注册失败：%v", shotAccelerator(), err)
-			a.shotTool.HotkeyProblem = "全局快捷键 " + shotHotkeyText() +
-				" 注册失败（可能被别的程序占用了）：" + err.Error() +
-				"；页面上的按钮仍然可以截图。"
-		} else {
-			log.Printf("全局快捷键 %s 已注册", shotAccelerator())
-		}
 	}
+	a.applyShortcuts()
 	a.watchClose()
 	a.setupTray()
 }
@@ -113,18 +105,12 @@ func trayMenuAttached(goos string) bool { return goos != "darwin" }
 // is what opens the window. AppIndicator reports no clicks at all.
 func trayClickOpensWindow(goos string) bool { return goos == "windows" || goos == "darwin" }
 
-// shotAccelerator is the global shortcut as mygo names it.
-func shotAccelerator() string {
+// defaultShotKey is the screenshot shortcut a fresh settings file starts with,
+// in the form the recorder writes, so that a key the user picks compares equal
+// to the one it replaces.
+func defaultShotKey() string {
 	if runtime.GOOS == "darwin" {
-		return "Command+Shift+A"
-	}
-	return "Control+Alt+A"
-}
-
-// shotHotkeyText is the same shortcut for people to read.
-func shotHotkeyText() string {
-	if runtime.GOOS == "darwin" {
-		return "⌘⇧A"
+		return "Super+Shift+A"
 	}
 	return "Ctrl+Alt+A"
 }

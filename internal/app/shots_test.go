@@ -81,6 +81,6 @@ func TestShots(t *testing.T) {
 	})
 
 	shot("settings", 1000, 680, func(a *App, tr *ui.Tester) {
-		a.settings, a.panel = true, 2
+		a.settings, a.panel = true, panelAbout
 	})
 }

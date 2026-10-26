@@ -15,11 +15,15 @@ const (
 	zoomStep = 0.05
 )
 
-// settings is what the user chose about the window's look, kept between
-// runs.
+// settings is what the user chose about the window's look and its keys, kept
+// between runs. The keys are pointers so that a file written before they
+// existed leaves them at their defaults, while a key cleared on purpose stays
+// cleared.
 type settings struct {
-	Theme string  `json:"theme"` // "light", "dark", or "system"
-	Zoom  float64 `json:"zoom"`  // 1 is the size the desktop asks for
+	Theme   string  `json:"theme"` // "light", "dark", or "system"
+	Zoom    float64 `json:"zoom"`  // 1 is the size the desktop asks for
+	ShotKey *string `json:"shotKey,omitempty"`
+	ShowKey *string `json:"showKey,omitempty"`
 }
 
 // settingsFile is where they are kept, beside the other settings of the
@@ -40,6 +44,7 @@ func defaultSettingsFile() string {
 // where the file does not read or says what is not allowed.
 func (a *App) loadSettings() {
 	a.themeMode, a.zoom = "system", 1
+	a.shotKey, a.showKey = defaultShotKey(), ""
 	if settingsFile == "" {
 		return
 	}
@@ -58,6 +63,12 @@ func (a *App) loadSettings() {
 	if s.Zoom >= minZoom && s.Zoom <= maxZoom {
 		a.zoom = s.Zoom
 	}
+	if s.ShotKey != nil {
+		a.shotKey = *s.ShotKey
+	}
+	if s.ShowKey != nil {
+		a.showKey = *s.ShowKey
+	}
 }
 
 // saveSettings writes the appearance now chosen, for the next run.
@@ -65,7 +76,12 @@ func (a *App) saveSettings() {
 	if settingsFile == "" {
 		return
 	}
-	data, err := json.MarshalIndent(settings{Theme: a.themeMode, Zoom: a.zoom}, "", "  ")
+	data, err := json.MarshalIndent(settings{
+		Theme:   a.themeMode,
+		Zoom:    a.zoom,
+		ShotKey: &a.shotKey,
+		ShowKey: &a.showKey,
+	}, "", "  ")
 	if err != nil {
 		return
 	}

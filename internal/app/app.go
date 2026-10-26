@@ -38,6 +38,16 @@ type App struct {
 	quitting bool
 	quitApp  func() // mygo.App.Quit, which a test may watch instead
 
+	// The global shortcuts, as mygo names them: the screenshot's, and the
+	// one that calls the window back. keyErr says why one did not take.
+	// recording is the shortcut being recorded, and recordFocus hands the
+	// keyboard to the box that takes the keys.
+	shotKey     string
+	showKey     string
+	keyErr      map[string]string
+	recording   string
+	recordFocus bool
+
 	// themeMode is "light", "dark" or "system", and zoom how much larger
 	// than usual the pages are drawn: the appearance the user chose.
 	themeMode string
@@ -75,7 +85,6 @@ func New() *App {
 		if s, ok := t.(*tools.Screenshot); ok {
 			a.shotTool = s
 			s.Shot = a.TakeShot
-			s.Hotkey = shotHotkeyText()
 		}
 	}
 	a.selected = a.tools[0].ID()
@@ -162,8 +171,16 @@ func (a *App) View(c *ui.Context) {
 		a.picked, a.settings = a.selected, false
 	}
 	// Escape leaves them too; nothing else is up to take it, the pages
-	// being unbuilt while the settings show.
-	if a.settings && c.Shortcut(0, ui.KeyEscape) {
+	// being unbuilt while the settings show. A shortcut being recorded
+	// takes the Escape itself, to call the recording off — the page may
+	// have lost the keyboard to another control by then.
+	if !a.settings {
+		a.recording = ""
+	}
+	if a.recording != "" && c.Shortcut(0, ui.KeyEscape) {
+		a.recording = ""
+	}
+	if a.settings && a.recording == "" && c.Shortcut(0, ui.KeyEscape) {
 		a.settings = false
 	}
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
@@ -193,7 +210,7 @@ func (a *App) View(c *ui.Context) {
 			ui.Column(c).Padding(14, 20).Gap(2).FillWidth().BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 				name, desc := a.current().Name(), a.current().Desc()
 				if a.settings {
-					name, desc = "设置", "外观、帮助与关于"
+					name, desc = "设置", "外观、快捷键、帮助与关于"
 				}
 				ui.Text(c, name).Bold().FontSize(widgets.Scaled(16))
 				ui.Text(c, desc).FontSize(widgets.Scaled(12)).TextColor(t.TextMuted)
@@ -237,12 +254,20 @@ func (a *App) page(c *ui.Context, t *ui.Theme) {
 	})
 }
 
+// The panels of the settings page, in the order its segments show them.
+const (
+	panelAppearance = iota
+	panelKeys
+	panelHelp
+	panelAbout
+)
+
 // settingsPage is what the toolbox says about itself: how it looks, the
 // readme, or what it is and what it is built with.
 func (a *App) settingsPage(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).FillWidth().FillHeight().Gap(10).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Segmented(c.Key("panel"), &a.panel, "外观", "帮助", "关于")
+			ui.Segmented(c.Key("panel"), &a.panel, "外观", "快捷键", "帮助", "关于")
 			ui.Spacer(c)
 			if ui.Button(c.Key("back"), "回到工具").Tooltip("也可以按 Esc，或点左边的工具").
 				Clicked() {
@@ -250,9 +275,11 @@ func (a *App) settingsPage(c *ui.Context, t *ui.Theme) {
 			}
 		})
 		switch a.panel {
-		case 0:
+		case panelAppearance:
 			a.appearancePage(c, t)
-		case 1:
+		case panelKeys:
+			a.keysPage(c, t)
+		case panelHelp:
 			a.helpView(c, t)
 		default:
 			ui.Scroll(c).Grow(1).FillWidth().Children(func() { a.about(c, t) })
