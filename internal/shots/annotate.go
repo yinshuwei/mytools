@@ -183,19 +183,3 @@ func Encode(src *image.RGBA, shapes []Shape) ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
-
-// Fit places a w×h picture in an area, as large as it fits and centered, and
-// says how many DIPs one of its pixels takes.
-func Fit(area ui.Rect, w, h int) (ui.Rect, float32) {
-	if w <= 0 || h <= 0 || area.W <= 0 || area.H <= 0 {
-		return ui.Rect{}, 0
-	}
-	k := min(area.W/float32(w), area.H/float32(h))
-	iw, ih := float32(w)*k, float32(h)*k
-	return ui.Rect{
-		X: area.X + (area.W-iw)/2,
-		Y: area.Y + (area.H-ih)/2,
-		W: iw,
-		H: ih,
-	}, k
-}

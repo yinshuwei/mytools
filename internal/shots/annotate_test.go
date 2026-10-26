@@ -11,27 +11,6 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// TestFit checks where a picture lands in an area: as large as it fits,
-// centered, keeping its shape.
-func TestFit(t *testing.T) {
-	area := ui.Rect{X: 10, Y: 20, W: 200, H: 100}
-	view, k := Fit(area, 400, 100)
-	if k != 0.5 {
-		t.Errorf("k = %v，want 0.5", k)
-	}
-	want := ui.Rect{X: 10, Y: 45, W: 200, H: 50}
-	if view != want {
-		t.Errorf("view = %+v，want %+v", view, want)
-	}
-	// A picture wider than tall and one taller than wide are both centered.
-	if view, k := Fit(area, 100, 400); k != 0.25 || view.H != 100 || view.Y != 20 {
-		t.Errorf("tall: view = %+v，k = %v", view, k)
-	}
-	if _, k := Fit(ui.Rect{}, 10, 10); k != 0 {
-		t.Errorf("empty area: k = %v，want 0", k)
-	}
-}
-
 // bluePicture is a blue picture to draw annotations on.
 func bluePicture(w, h int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))

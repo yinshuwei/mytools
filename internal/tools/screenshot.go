@@ -69,10 +69,9 @@ type Screenshot struct {
 	typing    bool
 	focusText bool
 
-	// view is where the picture shows, in the canvas's own DIPs, and k how
-	// many DIPs one of its pixels takes.
-	view ui.Rect
-	k    float32
+	// k is how many DIPs one picture pixel takes: one screen pixel, so on a
+	// HiDPI screen a fraction of a DIP.
+	k float32
 
 	// said reports what a save came to, from the goroutine that ran the
 	// dialog.
@@ -83,8 +82,15 @@ func (*Screenshot) ID() string   { return "shot" }
 func (*Screenshot) Name() string { return "截图" }
 func (*Screenshot) Desc() string { return "框选屏幕，在页面里标注、复制或保存" }
 
-// MaxWidth leaves the editor the room of a page of controls.
-func (*Screenshot) MaxWidth() float32 { return PageWidth }
+// MaxWidth keeps the page before a picture a column, as the other pages of
+// controls are; the editor itself takes the whole width, so that a wide
+// screenshot has the room it needs.
+func (s *Screenshot) MaxWidth() float32 {
+	if s.img != nil {
+		return 0
+	}
+	return 720
+}
 
 // FillsHeight gives the picture the whole room under the toolbar.
 func (*Screenshot) FillsHeight() bool { return true }
@@ -109,7 +115,9 @@ func (s *Screenshot) SetImage(img *image.RGBA, scale float64) {
 	s.shapes, s.redo = nil, nil
 	s.drawing, s.typing, s.text = false, false, ""
 	s.textAt = image.Point{}
-	s.view, s.k = ui.Rect{}, 0
+	// One picture pixel is one screen pixel: on a HiDPI screen that is a
+	// fraction of a DIP, so that nothing is scaled twice.
+	s.k = float32(1 / scale)
 	s.focusText = false
 }
 
@@ -125,10 +133,14 @@ func (s *Screenshot) View(c *ui.Context) {
 	}
 	s.shortcuts(c)
 	ui.Column(c).Grow(1).FillWidth().Gap(10).Children(func() {
-		s.toolbar(c, t)
-		if s.typing {
-			s.textRow(c)
-		}
+		// The controls stay in a column a hand can reach, as on the other
+		// pages; the picture below them takes the whole width.
+		ui.Column(c).FillWidth().MaxWidth(PageWidth).Gap(10).Children(func() {
+			s.toolbar(c, t)
+			if s.typing {
+				s.textRow(c)
+			}
+		})
 		s.canvasView(c)
 		s.status(c)
 	})
@@ -277,13 +289,30 @@ func (s *Screenshot) textRow(c *ui.Context) {
 	})
 }
 
+// canvasView shows the picture at its own size, in a viewport that scrolls
+// both ways: a screenshot is looked at pixel for pixel, not fitted. The
+// viewport is a surface of its own, outlined and tinted, so that the picture
+// and the room around it are told apart from the page.
 func (s *Screenshot) canvasView(c *ui.Context) {
+	if s.img == nil || s.k <= 0 {
+		return
+	}
+	t := c.Theme()
 	cursor := ui.CursorCrosshair
 	if s.tool == shots.ToolText {
 		cursor = ui.CursorText
 	}
-	ui.Box(c.Key("canvas")).FillWidth().Grow(1).MinHeight(widgets.Scaled(140)).
-		Label("画布").Cursor(cursor).HandleInput(s.input).Draw(s.draw)
+	b := s.img.Bounds()
+	w := float32(b.Dx()) * s.k
+	h := float32(b.Dy()) * s.k
+	ui.ScrollBoth(c.Key("scroll")).FillWidth().Grow(1).
+		Background(t.SurfaceHover).Border(1, t.Border).Radius(widgets.Scaled(8)).
+		Children(func() {
+			ui.Column(c).Padding(widgets.Scaled(12)).Children(func() {
+				ui.Box(c.Key("canvas")).Width(w).Height(h).Shrink(0).
+					Label("画布").Cursor(cursor).HandleInput(s.input).Draw(s.draw)
+			})
+		})
 }
 
 func (s *Screenshot) status(c *ui.Context) {
@@ -294,30 +323,18 @@ func (s *Screenshot) status(c *ui.Context) {
 	})
 }
 
-// draw paints the picture fitted into the canvas, the annotations over it,
-// and the shape being drawn.
+// draw paints the picture at its own size, the annotations over it, and the
+// shape being drawn.
 func (s *Screenshot) draw(p *ui.Painter, r ui.Rect) {
-	p.Fill(r, ui.RGBA(0, 0, 0, 0.22), 0)
-	if s.img == nil {
+	if s.img == nil || s.k <= 0 {
 		return
 	}
-	const margin = 6
-	area := ui.Rect{
-		X: r.X + margin, Y: r.Y + margin,
-		W: max(r.W-2*margin, 1), H: max(r.H-2*margin, 1),
-	}
-	view, k := shots.Fit(area, s.img.Bounds().Dx(), s.img.Bounds().Dy())
-	if k <= 0 {
-		return
-	}
-	s.view = ui.Rect{X: view.X - r.X, Y: view.Y - r.Y, W: view.W, H: view.H}
-	s.k = k
-	p.Image(s.bmp, view, ui.Contain)
-	shots.Draw(p, s.shapes, view.X, view.Y, k, s.img)
+	p.Image(s.bmp, r, ui.Contain)
+	shots.Draw(p, s.shapes, r.X, r.Y, s.k, s.img)
 	if sh, ok := s.pendingShape(); ok {
-		shots.Draw(p, []shots.Shape{sh}, view.X, view.Y, k, s.img)
+		shots.Draw(p, []shots.Shape{sh}, r.X, r.Y, s.k, s.img)
 	}
-	p.Stroke(view, ui.RGBA(255, 255, 255, 0.35), 0, 1)
+	p.Stroke(r, ui.RGBA(255, 255, 255, 0.25), 0, 1)
 }
 
 // input draws with the pointer: a drag makes a shape, a click of the text
@@ -355,14 +372,16 @@ func (s *Screenshot) input(ev ui.InputEvent) bool {
 		if ev.Button != 0 || !s.drawing {
 			return false
 		}
-		s.drawing = false
 		s.cur = s.clampImage(ev.X, ev.Y)
 		if s.tool == shots.ToolPen {
 			s.pen = append(s.pen, s.cur)
 		}
+		// The shape is taken before the drag ends: a shape is only pending
+		// while it is being drawn.
 		if sh, ok := s.pendingShape(); ok {
 			s.commit(sh)
 		}
+		s.drawing = false
 		return true
 	}
 	return false
@@ -447,7 +466,7 @@ func (s *Screenshot) clear() {
 	s.shapes, s.redo = nil, nil
 	s.drawing, s.typing, s.text = false, false, ""
 	s.textAt = image.Point{}
-	s.view, s.k = ui.Rect{}, 0
+	s.k = 0
 }
 
 func (s *Screenshot) copyImage(c *ui.Context) {
@@ -493,8 +512,8 @@ func (s *Screenshot) imageAt(x, y float32) (image.Point, bool) {
 	if s.img == nil || s.k <= 0 {
 		return image.Point{}, false
 	}
-	px := (x - s.view.X) / s.k
-	py := (y - s.view.Y) / s.k
+	px := x / s.k
+	py := y / s.k
 	if px < 0 || py < 0 || px >= float32(s.img.Bounds().Dx()) || py >= float32(s.img.Bounds().Dy()) {
 		return image.Point{}, false
 	}
@@ -510,7 +529,7 @@ func (s *Screenshot) clampImage(x, y float32) image.Point {
 	if s.img == nil || s.k <= 0 {
 		return image.Point{}
 	}
-	px := min(max((x-s.view.X)/s.k, 0), float32(s.img.Bounds().Dx()-1))
-	py := min(max((y-s.view.Y)/s.k, 0), float32(s.img.Bounds().Dy()-1))
+	px := min(max(x/s.k, 0), float32(s.img.Bounds().Dx()-1))
+	py := min(max(y/s.k, 0), float32(s.img.Bounds().Dy()-1))
 	return image.Pt(int(px), int(py))
 }

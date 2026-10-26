@@ -4,8 +4,6 @@ import (
 	"image"
 	"testing"
 
-	"github.com/egoist/mygo/ui"
-
 	"github.com/yinshuwei/mytools/internal/shots"
 )
 
@@ -13,17 +11,16 @@ import (
 // the picture: the picture is fitted, so its pixels are not the window's.
 func TestShotImageAt(t *testing.T) {
 	s := &Screenshot{
-		img:  image.NewRGBA(image.Rect(0, 0, 100, 50)),
-		view: ui.Rect{X: 10, Y: 5, W: 200, H: 100},
-		k:    2,
+		img: image.NewRGBA(image.Rect(0, 0, 100, 50)),
+		k:   2,
 	}
-	if pt, ok := s.imageAt(110, 55); !ok || pt != image.Pt(50, 25) {
+	if pt, ok := s.imageAt(100, 50); !ok || pt != image.Pt(50, 25) {
 		t.Errorf("点 = %v，%v，want (50,25)", pt, ok)
 	}
-	if _, ok := s.imageAt(9, 5); ok {
+	if _, ok := s.imageAt(-1, 5); ok {
 		t.Error("画面左边外也算点中")
 	}
-	if _, ok := s.imageAt(210, 105); ok {
+	if _, ok := s.imageAt(200, 100); ok {
 		t.Error("画面右边外也算点中")
 	}
 	// A drag that leaves the picture stops at its edge.
