@@ -265,6 +265,210 @@ func TestShotLayersPanel(t *testing.T) {
 	}
 }
 
+// TestShotChangeWidth checks the width slider on the shape the pointer took:
+// a whole drag of it makes one step of history, and a mosaic, which has no
+// stroke of its own, is left alone.
+func TestShotChangeWidth(t *testing.T) {
+	s := &Screenshot{}
+	s.SetImage(image.NewRGBA(image.Rect(0, 0, 200, 150)), 1)
+	s.shapes = []shots.Shape{
+		{Tool: shots.ToolRect, Width: 2, Rect: image.Rect(0, 0, 10, 10)},
+		{Tool: shots.ToolMosaic, Width: 10, Rect: image.Rect(20, 20, 40, 40)},
+	}
+	s.tool = shots.ToolSelect
+	s.took(0)
+	if s.width != 2 {
+		t.Errorf("选中后线宽 = %v，want 2", s.width)
+	}
+	s.width = 6
+	s.changeWidth()
+	if s.shapes[0].Width != 6 {
+		t.Errorf("改线宽后 = %v，want 6", s.shapes[0].Width)
+	}
+	steps := len(s.past)
+	s.width = 8
+	s.changeWidth()
+	if len(s.past) != steps {
+		t.Errorf("同一次拖动里又记了一步：%d → %d", steps, len(s.past))
+	}
+	if s.shapes[0].Width != 8 {
+		t.Errorf("再改后 = %v，want 8", s.shapes[0].Width)
+	}
+	s.undo()
+	if s.shapes[0].Width != 2 {
+		t.Errorf("撤销后 = %v，want 2（整段拖动一步）", s.shapes[0].Width)
+	}
+
+	s.sel = 1
+	before := len(s.past)
+	s.width = 4
+	s.changeWidth()
+	if s.shapes[1].Width != 10 || len(s.past) != before {
+		t.Errorf("马赛克被改了：%v，历史 %d → %d", s.shapes[1].Width, before, len(s.past))
+	}
+}
+
+// TestShotWidthSlider checks the slider itself: a press on it changes the
+// stroke of the shape the pointer took, in one step of history.
+func TestShotWidthSlider(t *testing.T) {
+	s := &Screenshot{}
+	s.SetImage(image.NewRGBA(image.Rect(0, 0, 200, 150)), 1)
+	s.shapes = []shots.Shape{{Tool: shots.ToolRect, Width: 2, Rect: image.Rect(10, 10, 60, 40)}}
+	s.tool, s.sel = shots.ToolSelect, 0
+	s.width = 2
+	tr := ui.NewTester(s.View, 900, 600)
+	tr.Frame()
+	r, ok := tr.Find("线宽滑块")
+	if !ok {
+		t.Fatal("没有找到线宽滑块")
+	}
+	tr.ClickAt(r.X+r.W-2, r.Y+r.H/2)
+	tr.Frame()
+	if s.shapes[0].Width != 10 {
+		t.Errorf("点滑块右端后线宽 = %v，want 10", s.shapes[0].Width)
+	}
+	if len(s.past) != 1 {
+		t.Errorf("历史 = %d 步，want 1", len(s.past))
+	}
+}
+
+// TestShotEditText checks a double click on a text: the field opens on its
+// words and the picture shows them as they are typed, Enter keeps the new
+// words in one step of history, and Escape puts the old ones back.
+func TestShotEditText(t *testing.T) {
+	s := &Screenshot{}
+	s.SetImage(image.NewRGBA(image.Rect(0, 0, 200, 150)), 1)
+	s.shapes = []shots.Shape{{Tool: shots.ToolText, Color: shotColors[0].col,
+		Text: "旧字", At: image.Pt(20, 20), Size: 16}}
+	s.tool = shots.ToolSelect
+	tr := ui.NewTester(s.View, 900, 600)
+	tr.Frame()
+
+	double := func() {
+		s.input(ui.InputEvent{Kind: ui.InputPointerDown, X: 24, Y: 24, Clicks: 2})
+		s.input(ui.InputEvent{Kind: ui.InputPointerUp, X: 24, Y: 24, Clicks: 2})
+	}
+	double()
+	if !s.typing || !s.editing || s.text != "旧字" {
+		t.Fatalf("双击后 typing=%v editing=%v text=%q", s.typing, s.editing, s.text)
+	}
+	s.text = "新字"
+	tr.Frame()
+	if got := s.shapes[0].Text; got != "新字" {
+		t.Errorf("输入时画面没有跟上：%q", got)
+	}
+	s.commitText()
+	if s.typing || s.editing {
+		t.Error("Enter 后还在编辑")
+	}
+	if got := s.shapes[0].Text; got != "新字" {
+		t.Errorf("提交后 = %q，want 新字", got)
+	}
+	if len(s.past) != 1 || len(s.shapes) != 1 {
+		t.Errorf("提交后 历史=%d 标注=%d，want 1、1", len(s.past), len(s.shapes))
+	}
+	s.undo()
+	if got := s.shapes[0].Text; got != "旧字" {
+		t.Errorf("撤销后 = %q，want 旧字", got)
+	}
+
+	// Escape puts the words back as they were, and adds nothing.
+	s.redoStep()
+	tr.Frame()
+	double()
+	s.text = "另一个"
+	s.cancelText()
+	if got := s.shapes[0].Text; got != "新字" {
+		t.Errorf("Esc 后 = %q，want 新字", got)
+	}
+	if len(s.shapes) != 1 || s.editing || s.typing {
+		t.Errorf("Esc 后 标注=%d editing=%v typing=%v", len(s.shapes), s.editing, s.typing)
+	}
+}
+
+// TestShotResize checks the grips: a corner of a box drags its sides out
+// while the other corner stays, an arrow's end follows the pointer and turns
+// it, and a pen's path is stretched with the box.
+func TestShotResize(t *testing.T) {
+	drag := func(s *Screenshot, x0, y0, x1, y1 float32) {
+		s.input(ui.InputEvent{Kind: ui.InputPointerDown, X: x0, Y: y0})
+		s.input(ui.InputEvent{Kind: ui.InputPointerMove, X: x1, Y: y1})
+		s.input(ui.InputEvent{Kind: ui.InputPointerUp, X: x1, Y: y1})
+	}
+
+	// A box: the corner opposite the grip stays where it was.
+	s := &Screenshot{
+		img: image.NewRGBA(image.Rect(0, 0, 200, 200)), k: 1, scale: 1,
+		tool: shots.ToolSelect, sel: 0,
+		shapes: []shots.Shape{{Tool: shots.ToolRect, Width: 2, Rect: image.Rect(20, 20, 80, 60)}},
+	}
+	drag(s, 80, 60, 140, 120)
+	if got := s.shapes[0].Rect; got != image.Rect(20, 20, 140, 120) {
+		t.Errorf("拖右下角后 = %v，want (20,20)-(140,120)", got)
+	}
+	s.undo()
+	if got := s.shapes[0].Rect; got != image.Rect(20, 20, 80, 60) {
+		t.Errorf("撤销后 = %v，want 原位", got)
+	}
+
+	// An arrow: its tip follows the pointer, which turns it.
+	s = &Screenshot{
+		img: image.NewRGBA(image.Rect(0, 0, 200, 200)), k: 1, scale: 1,
+		tool: shots.ToolSelect, sel: 0,
+		shapes: []shots.Shape{{Tool: shots.ToolArrow, Width: 3,
+			From: image.Pt(20, 20), To: image.Pt(120, 20)}},
+	}
+	drag(s, 120, 20, 100, 120)
+	if got := s.shapes[0].To; got != image.Pt(100, 120) {
+		t.Errorf("拖箭头尖后 To = %v，want (100,120)", got)
+	}
+	if s.shapes[0].From != image.Pt(20, 20) {
+		t.Errorf("箭尾被挪了：%v", s.shapes[0].From)
+	}
+
+	// A pen: the path fills the new box.
+	s = &Screenshot{
+		img: image.NewRGBA(image.Rect(0, 0, 200, 200)), k: 1, scale: 1,
+		tool: shots.ToolSelect, sel: 0,
+		shapes: []shots.Shape{{Tool: shots.ToolPen, Width: 2,
+			Points: []image.Point{{10, 10}, {50, 50}}}},
+	}
+	drag(s, 50, 50, 90, 90)
+	if pts := s.shapes[0].Points; pts[1] != image.Pt(90, 90) {
+		t.Errorf("拖大画笔后 = %v，want 末点 (90,90)", pts)
+	}
+
+	// A text has no grips: its size is its font's.
+	s = &Screenshot{
+		img: image.NewRGBA(image.Rect(0, 0, 200, 200)), k: 1, scale: 1,
+		tool: shots.ToolSelect, sel: 0,
+		shapes: []shots.Shape{{Tool: shots.ToolText, Color: shotColors[0].col,
+			Text: "字", At: image.Pt(20, 20), Size: 16}},
+	}
+	if s.gripAt(22, 22) >= 0 {
+		t.Error("文字不该有缩放手柄")
+	}
+}
+
+// TestShotResizeAtScale checks the grips at a display scale: the pointer is
+// in DIPs, the shape in the picture's pixels.
+func TestShotResizeAtScale(t *testing.T) {
+	s := &Screenshot{}
+	s.SetImage(image.NewRGBA(image.Rect(0, 0, 200, 150)), 2) // a pixel is half a DIP
+	s.shapes = []shots.Shape{{Tool: shots.ToolRect, Width: 2, Rect: image.Rect(20, 20, 120, 80)}}
+	s.tool, s.sel = shots.ToolSelect, 0
+	// The bottom-right grip sits at (60, 40) DIPs.
+	if got := s.gripAt(60, 40); got != 4 {
+		t.Fatalf("右下角手柄 = %d，want 4", got)
+	}
+	s.input(ui.InputEvent{Kind: ui.InputPointerDown, X: 60, Y: 40})
+	s.input(ui.InputEvent{Kind: ui.InputPointerMove, X: 80, Y: 50})
+	s.input(ui.InputEvent{Kind: ui.InputPointerUp, X: 80, Y: 50})
+	if got := s.shapes[0].Rect; got != image.Rect(20, 20, 160, 100) {
+		t.Errorf("缩放后 = %v，want (20,20)-(160,100)", got)
+	}
+}
+
 // TestShotToolAfterCommit checks that a shape leaves the pointer in the
 // select tool, on the shape just made: it is ready to be moved or deleted.
 func TestShotToolAfterCommit(t *testing.T) {

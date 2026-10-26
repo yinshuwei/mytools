@@ -75,19 +75,29 @@ type Screenshot struct {
 	pen     []image.Point
 
 	// The shape the pointer took, and where it was taken from: dragging it
-	// moves it. reveal asks the layers panel to scroll the row of a shape
-	// taken on the picture into view.
+	// moves it, and dragging one of its grips sizes it. reveal asks the
+	// layers panel to scroll the row of a shape taken on the picture into
+	// view.
 	sel      int
 	moving   bool
 	moved    bool
 	reveal   bool
+	grip     int // the grip in hand, or -1 for the shape itself
 	moveFrom image.Point
-	moveBase shots.Shape
+	base     shots.Shape // the shape as the drag began
 
 	textAt    image.Point
 	text      string
 	typing    bool
 	focusText bool
+	// A text opened by a double click is edited where it lies: editing holds
+	// it and its shape as it was, so that Escape can put the words back.
+	editing  bool
+	editAt   int
+	editBase shots.Shape
+	// widthing is a drag of the width slider in hand: the whole drag makes
+	// one step of history, not one for every pixel it passes.
+	widthing bool
 
 	// k is how many DIPs one picture pixel takes: one screen pixel, so on a
 	// HiDPI screen a fraction of a DIP.
@@ -137,6 +147,7 @@ func (s *Screenshot) SetImage(img *image.RGBA, scale float64) {
 	}
 	s.shapes, s.past, s.future = nil, nil, nil
 	s.sel = -1
+	s.editing, s.editAt = false, 0
 	s.drawing, s.typing, s.text = false, false, ""
 	s.textAt = image.Point{}
 	// One picture pixel is one screen pixel: on a HiDPI screen that is a
@@ -154,6 +165,12 @@ func (s *Screenshot) View(c *ui.Context) {
 	if s.img == nil {
 		s.landing(c, t)
 		return
+	}
+	// A text opened by a double click shows what is typed as it comes, so
+	// that the words are seen in place, not in the field.
+	if s.editing && s.editAt >= 0 && s.editAt < len(s.shapes) &&
+		s.shapes[s.editAt].Text != s.text {
+		s.shapes[s.editAt].Text = s.text
 	}
 	s.shortcuts(c)
 	ui.Column(c).Grow(1).FillWidth().Gap(10).Children(func() {
@@ -217,7 +234,7 @@ func (s *Screenshot) shortcuts(c *ui.Context) {
 	}
 	if s.typing {
 		if c.Shortcut(0, ui.KeyEscape) {
-			s.typing, s.text = false, ""
+			s.cancelText()
 		}
 		return
 	}
@@ -268,7 +285,7 @@ func (s *Screenshot) toolbar(c *ui.Context, t *ui.Theme) {
 		tool := int(s.tool)
 		if ui.Segmented(c.Key("tool"), &tool, shots.Names...).Changed() {
 			s.tool = shots.Tool(tool)
-			s.typing = false
+			s.cancelText()
 			if s.tool != shots.ToolSelect {
 				s.sel = -1
 			}
@@ -307,8 +324,13 @@ func (s *Screenshot) toolbar(c *ui.Context, t *ui.Theme) {
 			}
 		}
 		widgets.Hint(c, "线宽")
-		ui.Slider(c.Key("width"), &s.width, 1, 10).Width(widgets.Scaled(90)).
-			Label("线宽").Tooltip("画出来有多粗，以屏幕上的 DIP 计")
+		stroke := ui.Slider(c.Key("width"), &s.width, 1, 10).Width(widgets.Scaled(90)).
+			Label("线宽滑块").Tooltip("画出来有多粗，以屏幕上的 DIP 计；选中标注时改的就是它")
+		if stroke.Changed() {
+			s.changeWidth()
+		} else {
+			s.widthing = false
+		}
 		if s.textInHand() {
 			s.textSizeControl(c, t)
 		}
@@ -381,10 +403,11 @@ func (s *Screenshot) recolor(col color.RGBA) {
 }
 
 // took points the pointer at the shape at i, and the toolbar at what it
-// looks like: the pen it was drawn with, and the size of its text.
+// looks like: the pen and the stroke it was drawn with, and the size of its
+// text.
 func (s *Screenshot) took(i int) {
 	s.sel = i
-	if i < 0 || i >= len(s.shapes) {
+	if i < 0 || i >= len(s.shapes) || s.scale <= 0 {
 		return
 	}
 	sh := s.shapes[i]
@@ -393,6 +416,9 @@ func (s *Screenshot) took(i int) {
 			s.color = j
 			break
 		}
+	}
+	if sh.Tool != shots.ToolText && sh.Tool != shots.ToolMosaic {
+		s.width = min(max(float64(sh.Width)/s.scale, 1), 10)
 	}
 	if sh.Tool == shots.ToolText && s.scale > 0 {
 		s.textSize = float64(sh.Size) / s.scale
@@ -676,9 +702,8 @@ func (s *Screenshot) removeShape(i int) {
 func (s *Screenshot) status(c *ui.Context) {
 	ui.Row(c).Gap(12).Wrap().AlignItems(ui.Center).Children(func() {
 		widgets.Hint(c, fmt.Sprintf("%d × %d 像素", s.img.Bounds().Dx(), s.img.Bounds().Dy()))
-		widgets.Hint(c, "拖动绘制 · 选择工具拖动标注可移动，方向键微调（按住 Shift 一次 10 像素），"+
-			"Delete 删除 · "+widgets.ShortcutHint(0, "Z")+" 撤销 · "+
-			widgets.ShortcutHint(0, "C")+" 复制 · "+widgets.ShortcutHint(0, "S")+" 保存")
+		widgets.Hint(c, "拖动绘制 · 选中后拖动可移动、拖小圆点缩放（箭头的端点调方向）· "+
+			"方向键微调，按住 Shift 一次 10 像素 · Delete 删除")
 	})
 }
 
@@ -694,15 +719,19 @@ func (s *Screenshot) draw(p *ui.Painter, r ui.Rect) {
 		shots.Draw(p, []shots.Shape{sh}, r.X, r.Y, s.k, s.img)
 	}
 	// The shape the pointer took is ringed, so that a drag has something to
-	// hold on to; what is saved has no ring.
+	// hold on to; what is saved has no ring. An arrow goes without one: its
+	// two ends say it is taken.
 	if s.sel >= 0 && s.sel < len(s.shapes) {
-		b := s.shapes[s.sel].Bounds()
-		ring := ui.Rect{
-			X: r.X + float32(b.Min.X)*s.k, Y: r.Y + float32(b.Min.Y)*s.k,
-			W: float32(b.Dx()) * s.k, H: float32(b.Dy()) * s.k,
+		if s.shapes[s.sel].Tool != shots.ToolArrow {
+			b := s.shapes[s.sel].Bounds()
+			ring := ui.Rect{
+				X: r.X + float32(b.Min.X)*s.k, Y: r.Y + float32(b.Min.Y)*s.k,
+				W: float32(b.Dx()) * s.k, H: float32(b.Dy()) * s.k,
+			}
+			p.Stroke(ring, ui.RGBA(0, 0, 0, 0.45), 0, 3)
+			p.Stroke(ring, ui.RGBA(255, 255, 255, 0.9), 0, 1)
 		}
-		p.Stroke(ring, ui.RGBA(0, 0, 0, 0.45), 0, 3)
-		p.Stroke(ring, ui.RGBA(255, 255, 255, 0.9), 0, 1)
+		s.drawGrips(p, r)
 	}
 	p.Stroke(r, ui.RGBA(255, 255, 255, 0.25), 0, 1)
 }
@@ -721,6 +750,10 @@ func (s *Screenshot) input(ev ui.InputEvent) bool {
 		if ev.Button != 0 {
 			return false
 		}
+		if s.typing {
+			// A press away from the field puts the words down as they are.
+			s.commitText()
+		}
 		pt, ok := s.imageAt(ev.X, ev.Y)
 		if !ok {
 			s.sel = -1
@@ -728,12 +761,21 @@ func (s *Screenshot) input(ev ui.InputEvent) bool {
 		}
 		switch s.tool {
 		case shots.ToolSelect:
+			// A grip is taken before the shape: the handles sit on it.
+			if i := s.gripAt(ev.X, ev.Y); i >= 0 {
+				s.startGrip(i)
+				return true
+			}
+			// A double click on a text opens its words in the field.
+			if ev.Clicks >= 2 {
+				if i := s.shapeAt(pt); i >= 0 && s.shapes[i].Tool == shots.ToolText {
+					s.editText(i)
+					return true
+				}
+			}
 			s.grab(pt)
 			return true
 		case shots.ToolText:
-			if s.typing {
-				s.commitText()
-			}
 			s.textAt, s.text, s.typing, s.focusText = pt, "", true, true
 			return true
 		}
@@ -763,7 +805,7 @@ func (s *Screenshot) input(ev ui.InputEvent) bool {
 			return false
 		}
 		if s.moving {
-			s.moving = false
+			s.moving, s.grip = false, -1
 			return true
 		}
 		if !s.drawing {
@@ -837,8 +879,83 @@ func (s *Screenshot) grab(pt image.Point) {
 		return
 	}
 	s.reveal = true
+	s.moving, s.moved, s.grip = true, false, -1
+	s.moveFrom, s.base = pt, s.shapes[s.sel]
+}
+
+// startGrip takes a grip of the shape the pointer took, to size it.
+func (s *Screenshot) startGrip(i int) {
+	s.grip = i
 	s.moving, s.moved = true, false
-	s.moveFrom, s.moveBase = pt, s.shapes[s.sel]
+	s.base = s.shapes[s.sel]
+}
+
+// gripRadius is how big a grip is drawn, in DIPs.
+const gripRadius = 3.5
+
+// gripAt is the grip of the shape the pointer took that (x, y), in the
+// canvas's DIPs, is on, or -1.
+func (s *Screenshot) gripAt(x, y float32) int {
+	if s.sel < 0 || s.sel >= len(s.shapes) {
+		return -1
+	}
+	reach := float32(gripRadius + 3.5)
+	for i, g := range s.grips(s.shapes[s.sel]) {
+		if dx, dy := x-g.x, y-g.y; dx*dx+dy*dy <= reach*reach {
+			return i
+		}
+	}
+	return -1
+}
+
+// grip is a point of a shape that sizes it, in DIPs inside the canvas.
+type grip struct{ x, y float32 }
+
+// grips are the points a shape is sized by: the two ends of an arrow, or the
+// corners and the middles of the sides of a box. A text has none, as its size
+// is its font's.
+func (s *Screenshot) grips(sh shots.Shape) []grip {
+	switch sh.Tool {
+	case shots.ToolArrow:
+		return []grip{
+			{float32(sh.From.X) * s.k, float32(sh.From.Y) * s.k},
+			{float32(sh.To.X) * s.k, float32(sh.To.Y) * s.k},
+		}
+	case shots.ToolRect, shots.ToolEllipse, shots.ToolMosaic:
+		return boxGrips(sh.Rect, s.k)
+	case shots.ToolPen:
+		return boxGrips(sh.Bounds(), s.k)
+	}
+	return nil
+}
+
+// boxGrips are the eight points around a box, from the top-left corner round
+// clockwise.
+func boxGrips(r image.Rectangle, k float32) []grip {
+	x0, y0 := float32(r.Min.X)*k, float32(r.Min.Y)*k
+	x1, y1 := float32(r.Max.X)*k, float32(r.Max.Y)*k
+	mx, my := (x0+x1)/2, (y0+y1)/2
+	return []grip{
+		{x0, y0}, {mx, y0}, {x1, y0}, {x1, my},
+		{x1, y1}, {mx, y1}, {x0, y1}, {x0, my},
+	}
+}
+
+// drawGrips paints the handles of the shape the pointer took: white dots with
+// a dark ring, which stand out on any picture and are no part of what is
+// saved.
+func (s *Screenshot) drawGrips(p *ui.Painter, r ui.Rect) {
+	if s.sel < 0 || s.sel >= len(s.shapes) {
+		return
+	}
+	for _, g := range s.grips(s.shapes[s.sel]) {
+		box := ui.Rect{
+			X: r.X + g.x - gripRadius, Y: r.Y + g.y - gripRadius,
+			W: 2 * gripRadius, H: 2 * gripRadius,
+		}
+		p.Fill(box, ui.RGBA(255, 255, 255, 0.95), gripRadius)
+		p.Stroke(box, ui.RGBA(0, 0, 0, 0.55), gripRadius, 1)
+	}
 }
 
 // shapeAt is the index of the topmost shape under pt, or -1.
@@ -852,28 +969,101 @@ func (s *Screenshot) shapeAt(pt image.Point) int {
 }
 
 // dragSelection moves the shape the pointer took with it, from where it lay
-// as the drag began.
+// as the drag began, or sizes it by the grip in hand.
 func (s *Screenshot) dragSelection(x, y float32) {
 	if s.sel < 0 || s.sel >= len(s.shapes) || s.img == nil || s.k <= 0 {
 		return
 	}
 	pt := s.clampImage(x, y)
+	if s.grip >= 0 {
+		s.dragGrip(pt)
+		return
+	}
 	dx, dy := pt.X-s.moveFrom.X, pt.Y-s.moveFrom.Y
 	if dx == 0 && dy == 0 {
 		return
 	}
 	// The shape stays over the picture, however far the drag goes.
-	dx, dy = clampMove(s.moveBase, s.img.Bounds(), dx, dy)
-	if !s.moved {
-		// The state as the drag began, shape where it lay: undo goes back
-		// to it.
-		prev := append([]shots.Shape(nil), s.shapes...)
-		prev[s.sel] = s.moveBase
-		s.past = append(s.past, prev)
-		s.future = nil
-		s.moved = true
+	dx, dy = clampMove(s.base, s.img.Bounds(), dx, dy)
+	s.pushDrag()
+	s.shapes[s.sel] = s.base.Moved(dx, dy)
+}
+
+// pushDrag remembers the state as the drag began, the first time the drag
+// changes anything: undo goes back to it.
+func (s *Screenshot) pushDrag() {
+	if s.moved {
+		return
 	}
-	s.shapes[s.sel] = s.moveBase.Moved(dx, dy)
+	prev := append([]shots.Shape(nil), s.shapes...)
+	prev[s.sel] = s.base
+	s.past = append(s.past, prev)
+	s.future = nil
+	s.moved = true
+}
+
+// dragGrip sizes the shape by the grip in hand: a box takes the pointer as a
+// corner or an edge, a pen's path is stretched to the box the grip makes, and
+// an arrow's end follows the pointer, which turns it.
+func (s *Screenshot) dragGrip(pt image.Point) {
+	sh, next := s.base, s.base
+	switch sh.Tool {
+	case shots.ToolArrow:
+		if s.grip == 0 {
+			next.From = pt
+		} else {
+			next.To = pt
+		}
+		if next.From == sh.From && next.To == sh.To {
+			return
+		}
+	case shots.ToolRect, shots.ToolEllipse, shots.ToolMosaic:
+		next.Rect = resizeRect(sh.Rect, s.grip, pt)
+		if next.Rect == sh.Rect {
+			return
+		}
+	case shots.ToolPen:
+		r := resizeRect(sh.Bounds(), s.grip, pt)
+		if r == sh.Bounds() {
+			return
+		}
+		next = sh.Fit(r)
+	default:
+		return
+	}
+	s.pushDrag()
+	s.shapes[s.sel] = next
+}
+
+// resizeRect is the box a grip makes: the side opposite the grip stays where
+// it was, and a drag past it turns the box over.
+func resizeRect(r image.Rectangle, grip int, pt image.Point) image.Rectangle {
+	x0, y0, x1, y1 := r.Min.X, r.Min.Y, r.Max.X, r.Max.Y
+	switch grip {
+	case 0:
+		x0, y0 = pt.X, pt.Y
+	case 1:
+		y0 = pt.Y
+	case 2:
+		x1, y0 = pt.X, pt.Y
+	case 3:
+		x1 = pt.X
+	case 4:
+		x1, y1 = pt.X, pt.Y
+	case 5:
+		y1 = pt.Y
+	case 6:
+		x0, y1 = pt.X, pt.Y
+	case 7:
+		x0 = pt.X
+	}
+	if x1 < x0 {
+		x0, x1 = x1, x0
+	}
+	if y1 < y0 {
+		y0, y1 = y1, y0
+	}
+	return image.Rect(x0, y0, x1, y1)
 }
 
 // commit adds the shape that was just made and takes the pointer to it: what
@@ -887,10 +1077,74 @@ func (s *Screenshot) commit(sh shots.Shape) {
 }
 
 func (s *Screenshot) commitText() {
+	if s.editing {
+		s.finishEdit(true)
+		return
+	}
 	if sh, ok := s.pendingShape(); ok {
 		s.commit(sh)
 	}
 	s.typing, s.text = false, ""
+}
+
+// cancelText drops what is being typed: the words of a text being edited
+// come back as they were.
+func (s *Screenshot) cancelText() {
+	if s.editing {
+		s.finishEdit(false)
+		return
+	}
+	s.typing, s.text = false, ""
+}
+
+// editText opens the field on the text at i, to change its words where they
+// lie, with the picture showing them as they are typed.
+func (s *Screenshot) editText(i int) {
+	s.took(i)
+	s.editing, s.editAt, s.editBase = true, i, s.shapes[i]
+	s.text, s.textAt = s.shapes[i].Text, s.shapes[i].At
+	s.typing, s.focusText, s.moved = true, true, false
+}
+
+// finishEdit closes the field on the text that was opened: what was typed
+// takes the place of the words, in one step of history, or the words come
+// back as they were.
+func (s *Screenshot) finishEdit(keep bool) {
+	i, base, words := s.editAt, s.editBase, s.text
+	s.editing, s.typing, s.text = false, false, ""
+	if i < 0 || i >= len(s.shapes) {
+		return
+	}
+	if !keep || strings.TrimSpace(words) == "" || words == base.Text {
+		s.shapes[i] = base
+		return
+	}
+	s.shapes[i] = base
+	s.shapes[i].Text = words
+	prev := append([]shots.Shape(nil), s.shapes...)
+	prev[i] = base
+	s.past = append(s.past, prev)
+	if len(s.past) > maxUndo {
+		s.past = s.past[len(s.past)-maxUndo:]
+	}
+	s.future = nil
+}
+
+// changeWidth puts the width the slider holds on the shape the pointer took;
+// a whole drag of the slider makes one step of history, not one a pixel.
+func (s *Screenshot) changeWidth() {
+	if s.sel < 0 || s.sel >= len(s.shapes) {
+		return
+	}
+	sh := &s.shapes[s.sel]
+	if sh.Tool == shots.ToolText || sh.Tool == shots.ToolMosaic {
+		return
+	}
+	if !s.widthing {
+		s.widthing = true
+		s.keep()
+	}
+	sh.Width = float32(s.width) * float32(s.scale)
 }
 
 // maxUndo is how many states the history keeps: enough to go back through a
@@ -945,6 +1199,7 @@ func (s *Screenshot) clear() {
 	s.img, s.bmp = nil, nil
 	s.shapes, s.past, s.future = nil, nil, nil
 	s.sel = -1
+	s.editing, s.editAt = false, 0
 	s.drawing, s.typing, s.text = false, false, ""
 	s.textAt = image.Point{}
 	s.k = 0

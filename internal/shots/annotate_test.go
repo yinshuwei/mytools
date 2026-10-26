@@ -63,6 +63,15 @@ func TestShapeHit(t *testing.T) {
 	}
 }
 
+// TestPenBounds checks that a pen's box covers the whole path, not just its
+// last point.
+func TestPenBounds(t *testing.T) {
+	pen := Shape{Tool: ToolPen, Width: 2, Points: []image.Point{{10, 40}, {30, 10}, {60, 20}}}
+	if got := pen.Bounds(); got != image.Rect(9, 9, 61, 41) {
+		t.Errorf("画笔包围盒 = %v，want (9,9)-(61,41)", got)
+	}
+}
+
 // TestShapeMoved checks that every kind of shape moves with its own
 // geometry, and that a pen's path is its own.
 func TestShapeMoved(t *testing.T) {
@@ -141,33 +150,36 @@ func TestRasterizeCrop(t *testing.T) {
 	}
 }
 
-// TestArrowTapers checks the arrow's shape in the picture: thin at the tail,
-// wider along the shaft, and widest in the head at the tip.
-func TestArrowTapers(t *testing.T) {
+// TestArrowBarbs checks the arrow's shape in the picture: a stroke of one
+// width along its length, and two barbs back from the tip.
+func TestArrowBarbs(t *testing.T) {
 	src := bluePicture(220, 100)
 	out := Rasterize(src, src.Bounds(), []Shape{{
 		Tool: ToolArrow, Color: color.RGBA{R: 255, A: 255}, Width: 3,
 		From: image.Pt(10, 50), To: image.Pt(200, 50),
 	}})
-	// How thick the arrow is at a column: the red pixels down it.
+	red := func(x, y int) bool {
+		c := out.RGBAAt(x, y)
+		return c.R > 200 && c.B < 80
+	}
+	// How thick the shaft is at a column.
 	thick := func(x int) int {
 		n := 0
 		for y := 0; y < 100; y++ {
-			if c := out.RGBAAt(x, y); c.R > 200 && c.B < 80 {
+			if red(x, y) {
 				n++
 			}
 		}
 		return n
 	}
-	tail, mid, head := thick(20), thick(120), thick(190)
-	if tail >= mid {
-		t.Errorf("尾端 %d 像素粗，中段 %d，尾部没有更细", tail, mid)
+	if tail, mid := thick(20), thick(150); tail != mid {
+		t.Errorf("杆在尾端 %d 像素粗、中段 %d，want 一样粗", tail, mid)
 	}
-	if head <= mid {
-		t.Errorf("箭头处 %d 像素粗，中段 %d，箭头没有更宽", head, mid)
+	if !red(193, 46) || !red(193, 54) {
+		t.Error("箭头尖上没有上下两根倒刺")
 	}
-	if tail < 1 {
-		t.Error("尾端没有画上")
+	if red(180, 42) {
+		t.Error("倒刺之外的空白也画上了")
 	}
 }
 
