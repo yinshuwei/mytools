@@ -90,7 +90,7 @@ func TestKeysPage(t *testing.T) {
 	a.settings, a.panel = true, panelKeys
 	tr := ui.NewTester(a.View, 1000, 720)
 	tr.Frame()
-	if !tr.HasText("显示主窗口") || !tr.HasText("未设置") || !tr.HasText("程序在后台时也生效") {
+	if !tr.HasText("显示 / 隐藏窗口") || !tr.HasText("未设置") || !tr.HasText("程序在后台时也生效") {
 		t.Fatalf("快捷键页没有出现：%q", tr.Texts())
 	}
 	if err := tr.Click("截图：修改"); err != nil {

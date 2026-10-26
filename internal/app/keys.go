@@ -22,7 +22,7 @@ func (a *App) applyShortcuts() {
 	a.dropShortcuts()
 	a.keyErr = map[string]string{}
 	a.registerKey(keyShot, a.shotKey, a.TakeShot)
-	a.registerKey(keyWindow, a.showKey, a.showWindow)
+	a.registerKey(keyWindow, a.showKey, a.toggleWindow)
 	a.decorateShot()
 }
 
@@ -57,7 +57,7 @@ func (a *App) registerKey(which, acc string, fn func()) {
 func (a *App) setShortcut(which, acc string) {
 	cur, other, fn := &a.shotKey, a.showKey, a.TakeShot
 	if which == keyWindow {
-		cur, other, fn = &a.showKey, a.shotKey, a.showWindow
+		cur, other, fn = &a.showKey, a.shotKey, a.toggleWindow
 	}
 	if acc != "" && acc == other {
 		a.keyErr[which] = "这个组合已经给了另一个动作"
@@ -102,10 +102,11 @@ func (a *App) decorateShot() {
 func (a *App) keysPage(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Gap(14).FillWidth().Children(func() {
 		widgets.Field(c, "截图", func() { a.keyRow(c, t, keyShot, "截图", a.shotKey) })
-		widgets.Field(c, "显示主窗口", func() {
-			a.keyRow(c, t, keyWindow, "显示主窗口", a.showKey)
+		widgets.Field(c, "显示 / 隐藏窗口", func() {
+			a.keyRow(c, t, keyWindow, "显示 / 隐藏窗口", a.showKey)
 		})
 		widgets.Hint(c, "程序在后台时也生效。点「修改」后按下组合键即可，Esc 取消；组合里至少带一个修饰键（Ctrl / Alt / Shift / ⌘），F1–F12 可以单独用。")
+		widgets.Hint(c, "「显示 / 隐藏窗口」是开关：窗口在屏幕上就收起来，收起来了就叫回来。")
 		widgets.Hint(c, "「清除」就是不要这个快捷键。被别的程序占用了会保留原来那一套，并在这里说明。")
 	})
 }

@@ -33,10 +33,7 @@ func (a *App) editShot(img *image.RGBA, scale float64) {
 	a.selected = a.shotTool.ID()
 	a.picked = a.selected
 	a.settings = false
-	if a.win != nil {
-		a.win.Show()
-		a.win.Focus()
-	}
+	a.showWindow()
 }
 
 // SetupDesktop gives the toolbox its desktop manners: the global shortcut,

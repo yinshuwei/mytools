@@ -17,6 +17,24 @@ func TestCloseWithoutTrayQuits(t *testing.T) {
 	}
 }
 
+// TestWindowToggle checks what the shortcut does to the window: one on screen
+// goes away, one that is hidden or minimized comes back.
+func TestWindowToggle(t *testing.T) {
+	for _, c := range []struct {
+		visible   bool
+		minimized bool
+		want      windowAction
+	}{
+		{true, false, actHide},
+		{true, true, actShow},
+		{false, false, actShow},
+	} {
+		if got := windowActionFor(c.visible, c.minimized); got != c.want {
+			t.Errorf("显示=%v 最小化=%v 时 = %v，want %v", c.visible, c.minimized, got, c.want)
+		}
+	}
+}
+
 // TestTrayPlatforms checks what each platform can do with the icon: the menu
 // is on the icon itself everywhere but a Mac, where it would take the click,
 // and the click reaches the app everywhere but an AppIndicator.
