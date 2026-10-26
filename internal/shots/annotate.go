@@ -15,7 +15,8 @@ import (
 type Tool uint8
 
 const (
-	ToolRect Tool = iota
+	ToolSelect Tool = iota
+	ToolRect
 	ToolArrow
 	ToolPen
 	ToolText
@@ -23,7 +24,7 @@ const (
 )
 
 // Names are the tools as the toolbar shows them.
-var Names = []string{"矩形", "箭头", "画笔", "文字", "马赛克"}
+var Names = []string{"选择", "矩形", "箭头", "画笔", "文字", "马赛克"}
 
 // A Shape is one annotation, in the picture's own pixels: what is saved is
 // the picture's resolution, whatever size the window shows it at.
@@ -42,6 +43,116 @@ type Shape struct {
 	At   image.Point
 	Text string
 	Size float32
+}
+
+// Bounds is the box a shape covers, in the picture's pixels, stroke and all:
+// the box that follows it as it is moved.
+func (s Shape) Bounds() image.Rectangle {
+	half := int(s.Width / 2)
+	switch s.Tool {
+	case ToolRect, ToolMosaic:
+		return s.Rect.Inset(-half)
+	case ToolArrow:
+		return image.Rect(
+			min(s.From.X, s.To.X), min(s.From.Y, s.To.Y),
+			max(s.From.X, s.To.X), max(s.From.Y, s.To.Y),
+		).Inset(-half)
+	case ToolPen:
+		if len(s.Points) == 0 {
+			return image.Rectangle{}
+		}
+		r := image.Rect(s.Points[0].X, s.Points[0].Y, s.Points[0].X, s.Points[0].Y)
+		for _, pt := range s.Points[1:] {
+			r = r.Union(image.Rect(pt.X, pt.Y, pt.X, pt.Y))
+		}
+		return r.Inset(-half)
+	case ToolText:
+		return image.Rect(s.At.X, s.At.Y,
+			s.At.X+int(textWidth(s.Text, s.Size)), s.At.Y+int(s.Size*1.25))
+	}
+	return image.Rectangle{}
+}
+
+// Hit says whether pt, a pixel of the picture, is on the shape, with tol
+// pixels of slack: a line is taken by its stroke, not by the box around it.
+func (s Shape) Hit(pt image.Point, tol float32) bool {
+	reach := float64(tol + s.Width/2)
+	switch s.Tool {
+	case ToolRect, ToolMosaic:
+		// The inside counts as well: a rectangle is easier to take by
+		// what it frames than by its 2-pixel outline.
+		return pt.In(s.Rect.Inset(-int(tol)))
+	case ToolArrow:
+		return distToSegment(pt, s.From, s.To) <= reach
+	case ToolPen:
+		if len(s.Points) == 1 {
+			return dist(pt, s.Points[0]) <= reach
+		}
+		for i := 1; i < len(s.Points); i++ {
+			if distToSegment(pt, s.Points[i-1], s.Points[i]) <= reach {
+				return true
+			}
+		}
+		return false
+	case ToolText:
+		return pt.In(s.Bounds().Inset(-int(tol)))
+	}
+	return false
+}
+
+// Moved returns the shape shifted by dx, dy pixels of the picture.
+func (s Shape) Moved(dx, dy int) Shape {
+	d := image.Pt(dx, dy)
+	switch s.Tool {
+	case ToolRect, ToolMosaic:
+		s.Rect = s.Rect.Add(d)
+	case ToolArrow:
+		s.From, s.To = s.From.Add(d), s.To.Add(d)
+	case ToolText:
+		s.At = s.At.Add(d)
+	case ToolPen:
+		// A pen's path is its own: the shape it was moved from keeps the
+		// one it had, as undo goes back to it.
+		pts := make([]image.Point, len(s.Points))
+		for i, pt := range s.Points {
+			pts[i] = pt.Add(d)
+		}
+		s.Points = pts
+	}
+	return s
+}
+
+// textWidth estimates how wide a line of text runs, for a pointer to take
+// it: wide letters of a Latin alphabet are about half an em, and a CJK
+// character a whole one.
+func textWidth(text string, size float32) float32 {
+	var w float32
+	for _, r := range text {
+		if r >= 0x2e80 {
+			w += size
+		} else {
+			w += size * 0.55
+		}
+	}
+	return w
+}
+
+// distToSegment is how far pt is from the line from a to b.
+func distToSegment(pt, a, b image.Point) float64 {
+	ax, ay := float64(a.X), float64(a.Y)
+	bx, by := float64(b.X), float64(b.Y)
+	px, py := float64(pt.X), float64(pt.Y)
+	dx, dy := bx-ax, by-ay
+	len2 := dx*dx + dy*dy
+	t := 0.0
+	if len2 > 0 {
+		t = min(max(((px-ax)*dx+(py-ay)*dy)/len2, 0), 1)
+	}
+	return math.Hypot(px-(ax+t*dx), py-(ay+t*dy))
+}
+
+func dist(a, b image.Point) float64 {
+	return math.Hypot(float64(a.X-b.X), float64(a.Y-b.Y))
 }
 
 // Draw paints shapes on p, with the picture's top-left corner at (ox, oy),

@@ -18,6 +18,68 @@ func bluePicture(w, h int) *image.RGBA {
 	return img
 }
 
+// TestShapeHit checks what a pointer takes: a rectangle by its inside, an
+// arrow by its stroke rather than the box around it, a pen by its path, and
+// text by where it runs.
+func TestShapeHit(t *testing.T) {
+	rect := Shape{Tool: ToolRect, Width: 2, Rect: image.Rect(10, 10, 40, 30)}
+	if !rect.Hit(image.Pt(25, 20), 0) {
+		t.Error("矩形里面没点中")
+	}
+	if rect.Hit(image.Pt(60, 20), 0) {
+		t.Error("矩形外面点中了")
+	}
+
+	arrow := Shape{Tool: ToolArrow, Width: 2, From: image.Pt(0, 0), To: image.Pt(100, 100)}
+	if !arrow.Hit(image.Pt(50, 50), 1) {
+		t.Error("箭头上没点中")
+	}
+	if arrow.Hit(image.Pt(10, 90), 1) {
+		t.Error("箭头的框里、线外也点中了")
+	}
+
+	pen := Shape{Tool: ToolPen, Width: 4, Points: []image.Point{{0, 0}, {50, 0}, {50, 50}}}
+	if !pen.Hit(image.Pt(25, 2), 1) {
+		t.Error("画笔线上没点中")
+	}
+	if pen.Hit(image.Pt(25, 30), 1) {
+		t.Error("画笔折线外点中了")
+	}
+
+	text := Shape{Tool: ToolText, At: image.Pt(10, 10), Text: "ab", Size: 20}
+	if !text.Hit(image.Pt(20, 20), 2) {
+		t.Error("文字上没点中")
+	}
+	if text.Hit(image.Pt(80, 20), 2) {
+		t.Error("文字外点中了")
+	}
+}
+
+// TestShapeMoved checks that every kind of shape moves with its own
+// geometry, and that a pen's path is its own.
+func TestShapeMoved(t *testing.T) {
+	rect := Shape{Tool: ToolRect, Rect: image.Rect(0, 0, 10, 10)}.Moved(5, 7)
+	if rect.Rect != image.Rect(5, 7, 15, 17) {
+		t.Errorf("矩形移动后 = %v", rect.Rect)
+	}
+	arrow := Shape{Tool: ToolArrow, From: image.Pt(0, 0), To: image.Pt(5, 5)}.Moved(1, 2)
+	if arrow.From != image.Pt(1, 2) || arrow.To != image.Pt(6, 7) {
+		t.Errorf("箭头移动后 = %v → %v", arrow.From, arrow.To)
+	}
+	text := Shape{Tool: ToolText, At: image.Pt(3, 4)}.Moved(1, 1)
+	if text.At != image.Pt(4, 5) {
+		t.Errorf("文字移动后 = %v", text.At)
+	}
+	pen := Shape{Tool: ToolPen, Points: []image.Point{{0, 0}, {4, 4}}}
+	moved := pen.Moved(10, 0)
+	if moved.Points[0] != image.Pt(10, 0) {
+		t.Errorf("画笔移动后 = %v", moved.Points)
+	}
+	if pen.Points[0] != image.Pt(0, 0) {
+		t.Error("移动改了原来的画笔路径")
+	}
+}
+
 // TestRasterizeRect checks that a rectangle is drawn over the picture and
 // that the pixels outside it are the picture's own.
 func TestRasterizeRect(t *testing.T) {

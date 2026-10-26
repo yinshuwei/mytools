@@ -53,16 +53,29 @@ type Screenshot struct {
 	bmp   *ui.Bitmap
 	scale float64 // screen pixels per DIP, for strokes and text
 
+	// shapes are the annotations, and past and future are the states undo
+	// and redo go through: a move changes a shape where it lies, so the
+	// history keeps whole states rather than the shapes themselves.
 	shapes []shots.Shape
-	redo   []shots.Shape
-	tool   shots.Tool
-	color  int     // index into shotColors
-	width  float64 // stroke, in DIPs
+	past   [][]shots.Shape
+	future [][]shots.Shape
+
+	tool  shots.Tool
+	color int     // index into shotColors
+	width float64 // stroke, in DIPs
 
 	drawing bool
 	start   image.Point
 	cur     image.Point
 	pen     []image.Point
+
+	// The shape the pointer took, and where it was taken from: dragging it
+	// moves it.
+	sel      int
+	moving   bool
+	moved    bool
+	moveFrom image.Point
+	moveBase shots.Shape
 
 	textAt    image.Point
 	text      string
@@ -112,7 +125,8 @@ func (s *Screenshot) SetImage(img *image.RGBA, scale float64) {
 	if s.width <= 0 {
 		s.width = 3
 	}
-	s.shapes, s.redo = nil, nil
+	s.shapes, s.past, s.future = nil, nil, nil
+	s.sel = -1
 	s.drawing, s.typing, s.text = false, false, ""
 	s.textAt = image.Point{}
 	// One picture pixel is one screen pixel: on a HiDPI screen that is a
@@ -137,9 +151,6 @@ func (s *Screenshot) View(c *ui.Context) {
 		// pages; the picture below them takes the whole width.
 		ui.Column(c).FillWidth().MaxWidth(PageWidth).Gap(10).Children(func() {
 			s.toolbar(c, t)
-			if s.typing {
-				s.textRow(c)
-			}
 		})
 		s.canvasView(c)
 		s.status(c)
@@ -206,9 +217,15 @@ func (s *Screenshot) shortcuts(c *ui.Context) {
 	if c.Shortcut(0, ui.KeyEscape) {
 		if s.drawing {
 			s.drawing = false
+		} else if s.sel >= 0 {
+			s.sel = -1
 		} else {
 			s.clear()
 		}
+	}
+	if s.tool == shots.ToolSelect && s.sel >= 0 &&
+		(c.Shortcut(0, ui.KeyDelete) || c.Shortcut(0, ui.KeyBackspace)) {
+		s.removeSel()
 	}
 }
 
@@ -218,13 +235,16 @@ func (s *Screenshot) toolbar(c *ui.Context, t *ui.Theme) {
 		if ui.Segmented(c.Key("tool"), &tool, shots.Names...).Changed() {
 			s.tool = shots.Tool(tool)
 			s.typing = false
+			if s.tool != shots.ToolSelect {
+				s.sel = -1
+			}
 		}
 		ui.Spacer(c)
-		if ui.Button(c.Key("undo"), "撤销").Disabled(len(s.shapes) == 0).
+		if ui.Button(c.Key("undo"), "撤销").Disabled(len(s.past) == 0).
 			Tooltip("撤销上一步（" + widgets.ShortcutHint(0, "Z") + "）").Clicked() {
 			s.undo()
 		}
-		if ui.Button(c.Key("redo"), "重做").Disabled(len(s.redo) == 0).
+		if ui.Button(c.Key("redo"), "重做").Disabled(len(s.future) == 0).
 			Tooltip("重做（" + widgets.ShortcutHint(ui.Shift, "Z") + "）").Clicked() {
 			s.redoStep()
 		}
@@ -266,27 +286,52 @@ func (s *Screenshot) toolbar(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// textRow is the field a text annotation is typed in, under the toolbar.
-func (s *Screenshot) textRow(c *ui.Context) {
-	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-		widgets.Caption(c, "文字")
-		box := ui.TextInput(c.Key("text"), &s.text).
-			Placeholder("输入要标注的文字，Enter 放下").
-			Tooltip("Enter 把文字放在刚才点的地方，Esc 取消").Grow(1)
-		if s.focusText {
-			s.focusText = false
-			box.Focus()
-		}
-		if box.Submitted() {
-			s.commitText()
-		}
-		if ui.Button(c.Key("textok"), "放下").Clicked() {
-			s.commitText()
-		}
-		if ui.Button(c.Key("textcancel"), "取消").Clicked() {
-			s.typing, s.text = false, ""
-		}
-	})
+// textEditor floats where the text is being typed, over the picture: a field
+// in the page would push the picture down as it came and up as it went, and
+// the picture is what the eye is on.
+func (s *Screenshot) textEditor(c *ui.Context, t *ui.Theme) {
+	r, ok := s.popRect()
+	if !ok {
+		return
+	}
+	ui.Box(c.Key("textpop")).Absolute().Left(r.X).Top(r.Y).Width(r.W).
+		Background(t.Surface).Border(1, t.Border).Radius(widgets.Scaled(6)).
+		Shadow(0, widgets.Scaled(3), widgets.Scaled(12), 0, ui.RGBA(0, 0, 0, 0.35)).
+		Padding(widgets.Scaled(4)).
+		Children(func() {
+			box := ui.TextInput(c.Key("text"), &s.text).
+				Placeholder("输入文字，Enter 放下").
+				Tooltip("Enter 把文字放在这里，Esc 取消")
+			if s.focusText {
+				s.focusText = false
+				box.Focus()
+			}
+			if box.Submitted() {
+				s.commitText()
+			}
+		})
+}
+
+// popRect is where the text field floats, in DIPs from the picture's corner:
+// under the text where there is room, over it where there is not, and never
+// off the picture.
+func (s *Screenshot) popRect() (ui.Rect, bool) {
+	if !s.typing || s.img == nil || s.k <= 0 {
+		return ui.Rect{}, false
+	}
+	w := float32(s.img.Bounds().Dx()) * s.k
+	h := float32(s.img.Bounds().Dy()) * s.k
+	fw, fh := widgets.Scaled(220), widgets.Scaled(40)
+	x := float32(s.textAt.X) * s.k
+	y := float32(s.textAt.Y)*s.k + widgets.Scaled(22)
+	if y+fh > h {
+		y = float32(s.textAt.Y)*s.k - fh - widgets.Scaled(6)
+	}
+	return ui.Rect{
+		X: min(max(x, 0), max(w-fw, 0)),
+		Y: min(max(y, 0), max(h-fh, 0)),
+		W: fw, H: fh,
+	}, true
 }
 
 // canvasView shows the picture at its own size, in a viewport that scrolls
@@ -299,8 +344,11 @@ func (s *Screenshot) canvasView(c *ui.Context) {
 	}
 	t := c.Theme()
 	cursor := ui.CursorCrosshair
-	if s.tool == shots.ToolText {
+	switch s.tool {
+	case shots.ToolText:
 		cursor = ui.CursorText
+	case shots.ToolSelect:
+		cursor = ui.CursorMove
 	}
 	b := s.img.Bounds()
 	w := float32(b.Dx()) * s.k
@@ -310,7 +358,12 @@ func (s *Screenshot) canvasView(c *ui.Context) {
 		Children(func() {
 			ui.Column(c).Padding(widgets.Scaled(12)).Children(func() {
 				ui.Box(c.Key("canvas")).Width(w).Height(h).Shrink(0).
-					Label("画布").Cursor(cursor).HandleInput(s.input).Draw(s.draw)
+					Label("画布").Cursor(cursor).HandleInput(s.input).Draw(s.draw).
+					Children(func() {
+						if s.typing {
+							s.textEditor(c, t)
+						}
+					})
 			})
 		})
 }
@@ -318,7 +371,8 @@ func (s *Screenshot) canvasView(c *ui.Context) {
 func (s *Screenshot) status(c *ui.Context) {
 	ui.Row(c).Gap(12).Wrap().AlignItems(ui.Center).Children(func() {
 		widgets.Hint(c, fmt.Sprintf("%d × %d 像素", s.img.Bounds().Dx(), s.img.Bounds().Dy()))
-		widgets.Hint(c, "拖动绘制 · "+widgets.ShortcutHint(0, "Z")+" 撤销 · "+
+		widgets.Hint(c, "拖动绘制 · 选择工具拖动标注可移动，Delete 删除 · "+
+			widgets.ShortcutHint(0, "Z")+" 撤销 · "+
 			widgets.ShortcutHint(0, "C")+" 复制 · "+widgets.ShortcutHint(0, "S")+" 保存")
 	})
 }
@@ -334,12 +388,29 @@ func (s *Screenshot) draw(p *ui.Painter, r ui.Rect) {
 	if sh, ok := s.pendingShape(); ok {
 		shots.Draw(p, []shots.Shape{sh}, r.X, r.Y, s.k, s.img)
 	}
+	// The shape the pointer took is ringed, so that a drag has something to
+	// hold on to; what is saved has no ring.
+	if s.tool == shots.ToolSelect && s.sel >= 0 && s.sel < len(s.shapes) {
+		b := s.shapes[s.sel].Bounds()
+		ring := ui.Rect{
+			X: r.X + float32(b.Min.X)*s.k, Y: r.Y + float32(b.Min.Y)*s.k,
+			W: float32(b.Dx()) * s.k, H: float32(b.Dy()) * s.k,
+		}
+		p.Stroke(ring, ui.RGBA(0, 0, 0, 0.45), 0, 3)
+		p.Stroke(ring, ui.RGBA(255, 255, 255, 0.9), 0, 1)
+	}
 	p.Stroke(r, ui.RGBA(255, 255, 255, 0.25), 0, 1)
 }
 
 // input draws with the pointer: a drag makes a shape, a click of the text
 // tool says where the text goes.
 func (s *Screenshot) input(ev ui.InputEvent) bool {
+	// The field floats over the picture: a press there is a press on the
+	// field, not on the picture under it.
+	if r, ok := s.popRect(); ok &&
+		ev.X >= r.X && ev.X <= r.X+r.W && ev.Y >= r.Y && ev.Y <= r.Y+r.H {
+		return false
+	}
 	switch ev.Kind {
 	case ui.InputPointerDown:
 		if ev.Button != 0 {
@@ -347,9 +418,17 @@ func (s *Screenshot) input(ev ui.InputEvent) bool {
 		}
 		pt, ok := s.imageAt(ev.X, ev.Y)
 		if !ok {
+			s.sel = -1
 			return false
 		}
-		if s.tool == shots.ToolText {
+		switch s.tool {
+		case shots.ToolSelect:
+			s.grab(pt)
+			return true
+		case shots.ToolText:
+			if s.typing {
+				s.commitText()
+			}
 			s.textAt, s.text, s.typing, s.focusText = pt, "", true, true
 			return true
 		}
@@ -358,6 +437,10 @@ func (s *Screenshot) input(ev ui.InputEvent) bool {
 		s.pen = []image.Point{pt}
 		return true
 	case ui.InputPointerMove:
+		if s.moving {
+			s.dragSelection(ev.X, ev.Y)
+			return true
+		}
 		if !s.drawing {
 			return false
 		}
@@ -369,7 +452,14 @@ func (s *Screenshot) input(ev ui.InputEvent) bool {
 		}
 		return true
 	case ui.InputPointerUp:
-		if ev.Button != 0 || !s.drawing {
+		if ev.Button != 0 {
+			return false
+		}
+		if s.moving {
+			s.moving = false
+			return true
+		}
+		if !s.drawing {
 			return false
 		}
 		s.cur = s.clampImage(ev.X, ev.Y)
@@ -431,9 +521,65 @@ func (s *Screenshot) pendingShape() (shots.Shape, bool) {
 	return shots.Shape{}, false
 }
 
+// grab takes the topmost shape under pt, if any, to be dragged: what comes
+// last is what the eye sees on top.
+func (s *Screenshot) grab(pt image.Point) {
+	s.sel = s.shapeAt(pt)
+	if s.sel < 0 {
+		s.moving = false
+		return
+	}
+	s.moving, s.moved = true, false
+	s.moveFrom, s.moveBase = pt, s.shapes[s.sel]
+}
+
+// shapeAt is the index of the topmost shape under pt, or -1.
+func (s *Screenshot) shapeAt(pt image.Point) int {
+	for i := len(s.shapes) - 1; i >= 0; i-- {
+		if s.shapes[i].Hit(pt, 4) {
+			return i
+		}
+	}
+	return -1
+}
+
+// dragSelection moves the shape the pointer took with it, from where it lay
+// as the drag began.
+func (s *Screenshot) dragSelection(x, y float32) {
+	if s.sel < 0 || s.sel >= len(s.shapes) || s.img == nil || s.k <= 0 {
+		return
+	}
+	pt := s.clampImage(x, y)
+	dx, dy := pt.X-s.moveFrom.X, pt.Y-s.moveFrom.Y
+	if dx == 0 && dy == 0 {
+		return
+	}
+	// The shape stays over the picture, however far the drag goes.
+	b, frame := s.moveBase.Bounds(), s.img.Bounds()
+	loX, hiX := frame.Min.X-b.Min.X, frame.Max.X-b.Max.X
+	if loX > hiX {
+		loX, hiX = hiX, loX
+	}
+	loY, hiY := frame.Min.Y-b.Min.Y, frame.Max.Y-b.Max.Y
+	if loY > hiY {
+		loY, hiY = hiY, loY
+	}
+	dx, dy = min(max(dx, loX), hiX), min(max(dy, loY), hiY)
+	if !s.moved {
+		// The state as the drag began, shape where it lay: undo goes back
+		// to it.
+		prev := append([]shots.Shape(nil), s.shapes...)
+		prev[s.sel] = s.moveBase
+		s.past = append(s.past, prev)
+		s.future = nil
+		s.moved = true
+	}
+	s.shapes[s.sel] = s.moveBase.Moved(dx, dy)
+}
+
 func (s *Screenshot) commit(sh shots.Shape) {
+	s.keep()
 	s.shapes = append(s.shapes, sh)
-	s.redo = nil
 }
 
 func (s *Screenshot) commitText() {
@@ -443,27 +589,63 @@ func (s *Screenshot) commitText() {
 	s.typing, s.text = false, ""
 }
 
+// maxUndo is how many states the history keeps: enough to go back through a
+// session of annotating, and no more.
+const maxUndo = 100
+
+// keep remembers the shapes as they are before a change. A change is undone
+// by going back to a whole state, as a shape can be moved as well as added.
+func (s *Screenshot) keep() {
+	s.past = append(s.past, append([]shots.Shape(nil), s.shapes...))
+	if len(s.past) > maxUndo {
+		s.past = s.past[len(s.past)-maxUndo:]
+	}
+	s.future = nil
+}
+
 func (s *Screenshot) undo() {
-	if len(s.shapes) == 0 {
+	if len(s.past) == 0 {
 		return
 	}
-	last := s.shapes[len(s.shapes)-1]
-	s.shapes = s.shapes[:len(s.shapes)-1]
-	s.redo = append(s.redo, last)
+	s.future = append(s.future, append([]shots.Shape(nil), s.shapes...))
+	s.shapes = s.past[len(s.past)-1]
+	s.past = s.past[:len(s.past)-1]
+	s.afterHistory()
 }
 
 func (s *Screenshot) redoStep() {
-	if len(s.redo) == 0 {
+	if len(s.future) == 0 {
 		return
 	}
-	last := s.redo[len(s.redo)-1]
-	s.redo = s.redo[:len(s.redo)-1]
-	s.shapes = append(s.shapes, last)
+	s.past = append(s.past, append([]shots.Shape(nil), s.shapes...))
+	s.shapes = s.future[len(s.future)-1]
+	s.future = s.future[:len(s.future)-1]
+	s.afterHistory()
+}
+
+// afterHistory drops a selection that a state change left behind.
+func (s *Screenshot) afterHistory() {
+	if s.sel >= len(s.shapes) {
+		s.sel = -1
+	}
+}
+
+// removeSel deletes the shape the pointer took, as Delete does.
+func (s *Screenshot) removeSel() {
+	if s.sel < 0 || s.sel >= len(s.shapes) {
+		return
+	}
+	s.keep()
+	s.shapes = append(s.shapes[:s.sel], s.shapes[s.sel+1:]...)
+	if s.sel >= len(s.shapes) {
+		s.sel = -1
+	}
 }
 
 func (s *Screenshot) clear() {
 	s.img, s.bmp = nil, nil
-	s.shapes, s.redo = nil, nil
+	s.shapes, s.past, s.future = nil, nil, nil
+	s.sel = -1
 	s.drawing, s.typing, s.text = false, false, ""
 	s.textAt = image.Point{}
 	s.k = 0
