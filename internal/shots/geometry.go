@@ -3,9 +3,6 @@ package shots
 import (
 	"image"
 	"math"
-	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -71,88 +68,6 @@ func cropRect(sel, content ui.Rect, img image.Rectangle) image.Rectangle {
 func pixelSize(sel, content ui.Rect, img image.Rectangle) (int, int) {
 	r := cropRect(sel, content, img)
 	return r.Dx(), r.Dy()
-}
-
-// shotAction is what a button of the overlay does.
-type shotAction uint8
-
-const (
-	actCopy shotAction = iota
-	actSave
-	actCancel
-)
-
-// shotButton is one button drawn over the picture.
-type shotButton struct {
-	action shotAction
-	label  string
-	rect   ui.Rect // local to the overlay's content
-}
-
-// buttonsAt lays the toolbar out in the bottom-right corner of a w×h area.
-func buttonsAt(w, h float32) []shotButton {
-	const (
-		height = 30
-		gap    = 8
-		margin = 16
-	)
-	labels := []struct {
-		action shotAction
-		label  string
-	}{
-		{actCopy, "复制"},
-		{actSave, "保存"},
-		{actCancel, "取消"},
-	}
-	width := float32(64)
-	gapTotal := float32(len(labels)-1) * gap
-	if w-2*margin < width*float32(len(labels))+gapTotal {
-		width = (w - 2*margin - gapTotal) / float32(len(labels))
-		// Keep the row inside the margins even after the float math:
-		// rounding up by a hundredth of a DIP is invisible, but it is
-		// enough to draw past the edge.
-		width = float32(math.Floor(float64(width)*100)) / 100
-		if width < 32 {
-			width = 32
-		}
-	}
-	total := width*float32(len(labels)) + gapTotal
-	x := w - margin - total
-	if x < margin {
-		x = margin
-	}
-	y := h - margin - height
-	if y < margin {
-		y = margin
-	}
-	out := make([]shotButton, 0, len(labels))
-	for i, l := range labels {
-		out = append(out, shotButton{
-			action: l.action,
-			label:  l.label,
-			rect:   ui.Rect{X: x + float32(i)*(width+gap), Y: y, W: width, H: height},
-		})
-	}
-	return out
-}
-
-// saveName is the name the save dialog starts with.
-func saveName(t time.Time) string {
-	return "screenshot-" + t.Format("20060102-150405") + ".png"
-}
-
-// savePath is the file the save dialog starts at: the pictures folder when
-// the desktop has one, the home folder otherwise.
-func savePath(now time.Time) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return saveName(now)
-	}
-	dir := filepath.Join(home, "Pictures")
-	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-		dir = home
-	}
-	return filepath.Join(dir, saveName(now))
 }
 
 func abs(v float32) float32 {

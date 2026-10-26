@@ -1,19 +1,14 @@
-// Package shots takes a region of the screen, lets the user choose and
-// annotate nothing yet, then copies or saves it.
+// Package shots takes a region of the screen and hands it to the toolbox,
+// where it is edited and annotated and then copied or saved.
 package shots
 
 import (
-	"bytes"
 	"errors"
-	"image/png"
-	"log"
-	"os"
-	"path/filepath"
-	"strings"
+	"image"
+	"image/draw"
 	"time"
 
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/transfer"
 
 	"github.com/yinshuwei/mytools/internal/capture"
 )
@@ -23,11 +18,16 @@ import (
 const hideDelay = 160 * time.Millisecond
 
 // Service runs the screenshot: hiding the toolbox, taking the picture,
-// opening an overlay on every display, and putting the chosen part on the
-// clipboard or in a file.
+// opening an overlay on every display, and handing the chosen part to the
+// toolbox to edit.
 type Service struct {
 	win     *mygo.Window
 	problem error // why a screenshot cannot be taken here, nil when it can
+
+	// Deliver takes the chosen picture and the display's scale, in pixels
+	// per DIP. It runs on the main thread, once the overlays are gone and
+	// the toolbox is back.
+	Deliver func(img *image.RGBA, scale float64)
 
 	busy      bool
 	finishing bool
@@ -57,7 +57,6 @@ func (s *Service) Start() {
 }
 
 func (s *Service) start() {
-	log.Printf("shots: start busy=%v finishing=%v problem=%v", s.busy, s.finishing, s.problem)
 	if s.busy || s.finishing || s.win.IsDestroyed() {
 		return
 	}
@@ -88,7 +87,6 @@ func (s *Service) capture(gen int, focus int64) {
 		targets = append(targets, capture.FromDisplay(d))
 	}
 	frames, err := capture.Capture(targets)
-	log.Printf("shots: captured %d frames err=%v", len(frames), err)
 	s.win.Update(func() {
 		if s.gen != gen || !s.busy {
 			return // superseded, or left while the picture was coming
@@ -117,7 +115,6 @@ func (s *Service) open(frames []capture.Frame, focus int64) {
 	for _, o := range s.overlays {
 		o.win.Show()
 	}
-	log.Printf("shots: %d overlays up", len(s.overlays))
 	for _, o := range s.overlays {
 		if o.frame.Display.ID == focus {
 			o.win.Focus()
@@ -137,7 +134,6 @@ func (s *Service) fail(err error) {
 
 // cancel leaves the overlays without a picture.
 func (s *Service) cancel() {
-	log.Printf("shots: cancel busy=%v finishing=%v", s.busy, s.finishing)
 	if !s.busy || s.finishing {
 		return
 	}
@@ -153,13 +149,9 @@ func (s *Service) cancel() {
 	})
 }
 
-func (s *Service) copy(o *overlay) { s.finish(o, true, false) }
-func (s *Service) save(o *overlay) { s.finish(o, false, true) }
-
-// finish takes the selected pixels, closes the overlays, and lets the
-// toolbox come back while the picture is encoded and handed over.
-func (s *Service) finish(o *overlay, copyIt, saveIt bool) {
-	log.Printf("shots: finish copy=%v save=%v sel=%+v size=%+v", copyIt, saveIt, o.sel, o.size)
+// editOverlay takes the chosen pixels to the toolbox: the overlays go, the
+// toolbox comes back, and the page there shows the picture to work on.
+func (s *Service) editOverlay(o *overlay) {
 	if !s.busy || s.finishing || !o.hasSelection() {
 		return
 	}
@@ -167,32 +159,23 @@ func (s *Service) finish(o *overlay, copyIt, saveIt bool) {
 	if rect.Empty() {
 		return
 	}
+	// The picture is copied out of the display's frame: it outlives the
+	// overlay windows, and its own bounds make the annotations' coordinates
+	// simple.
+	img := image.NewRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
+	draw.Draw(img, img.Bounds(), o.frame.Image, rect.Min, draw.Src)
+	scale := o.frame.Display.Scale
 	s.finishing = true
-	img := o.frame.Image.SubImage(rect)
-	// Same reason as cancel: close the overlays after this event has been
-	// dispatched, not inside it.
+	// Same reason as cancel: the windows are closed after this event has
+	// been dispatched, not inside it.
 	s.win.Update(func() {
 		s.closeOverlays()
 		s.restore()
 		s.busy = false
 		s.finishing = false
-
-		go func() {
-			var buf bytes.Buffer
-			if err := png.Encode(&buf, img); err != nil {
-				s.report(err)
-				return
-			}
-			data := buf.Bytes()
-			if copyIt {
-				if err := copyPNG(data); err != nil {
-					s.report(err)
-				}
-			}
-			if saveIt {
-				s.savePNG(data)
-			}
-		}()
+		if s.Deliver != nil {
+			s.Deliver(img, scale)
+		}
 	})
 }
 
@@ -212,32 +195,6 @@ func (s *Service) restore() {
 	s.hidden = false
 	s.win.Show()
 	s.win.Focus()
-}
-
-func copyPNG(data []byte) error {
-	return mygo.Clipboard.Write(transfer.New(transfer.NewItem(transfer.Bytes(transfer.PNG, data))))
-}
-
-func (s *Service) savePNG(data []byte) {
-	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
-		Parent:      s.win,
-		Title:       "保存截图",
-		DefaultPath: savePath(time.Now()),
-		Filters:     []mygo.FileFilter{{Name: "PNG 图片", Extensions: []string{"png"}}},
-	})
-	if err != nil {
-		s.report(err)
-		return
-	}
-	if path == "" {
-		return // the dialog was dismissed
-	}
-	if !strings.HasSuffix(strings.ToLower(path), ".png") {
-		path += ".png"
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		s.report(err)
-	}
 }
 
 func (s *Service) report(err error) {
@@ -265,7 +222,3 @@ func Friendly(err error) string {
 	}
 	return err.Error()
 }
-
-// SaveDir names the folder the save dialog starts in, for tests and for
-// anything that wants to show it.
-func SaveDir() string { return filepath.Dir(savePath(time.Now())) }

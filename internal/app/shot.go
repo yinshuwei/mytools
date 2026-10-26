@@ -23,6 +23,22 @@ func (a *App) TakeShot() {
 	}
 }
 
+// editShot shows the picture the overlay chose in the screenshot page, where
+// it is annotated, copied or saved.
+func (a *App) editShot(img *image.RGBA, scale float64) {
+	if a.shotTool == nil {
+		return
+	}
+	a.shotTool.SetImage(img, scale)
+	a.selected = a.shotTool.ID()
+	a.picked = a.selected
+	a.settings = false
+	if a.win != nil {
+		a.win.Show()
+		a.win.Focus()
+	}
+}
+
 // SetupDesktop gives the toolbox its desktop manners: the global shortcut,
 // the tray icon, and the screenshot service. It runs once, after the window
 // exists.
@@ -31,6 +47,7 @@ func (a *App) SetupDesktop() {
 		return
 	}
 	a.shots = shots.New(a.win)
+	a.shots.Deliver = a.editShot
 	if a.shotTool != nil {
 		a.shotTool.Shot = a.TakeShot
 		a.shotTool.Hotkey = shotHotkeyText()

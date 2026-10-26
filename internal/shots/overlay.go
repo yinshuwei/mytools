@@ -1,8 +1,6 @@
 package shots
 
 import (
-	"log"
-	"runtime"
 	"strconv"
 
 	"github.com/egoist/mygo"
@@ -12,7 +10,7 @@ import (
 )
 
 // overlay is one display's window: its frozen picture, the selection on it,
-// and the toolbar.
+// and the hint that says what Enter does.
 type overlay struct {
 	s     *Service
 	frame capture.Frame
@@ -66,24 +64,17 @@ func (o *overlay) create() {
 }
 
 func (o *overlay) view(c *ui.Context) {
-	c.OnShortcut(0, ui.KeyEscape, func() { log.Printf("shots: shortcut escape"); o.s.cancel() })
-	c.OnShortcut(0, ui.KeyEnter, func() { log.Printf("shots: shortcut enter"); o.copy() })
-	c.OnShortcut(ui.Cmd, ui.KeyC, func() { log.Printf("shots: shortcut C"); o.copy() })
-	c.OnShortcut(ui.Cmd, ui.KeyS, func() { log.Printf("shots: shortcut S"); o.save() })
+	c.OnShortcut(0, ui.KeyEscape, func() { o.s.cancel() })
+	c.OnShortcut(0, ui.KeyEnter, func() { o.confirm() })
 	ui.Box(c).FillWidth().FillHeight().Cursor(ui.CursorCrosshair).
-		HandleInput(o.input).
-		Draw(o.draw)
+		HandleInput(o.input).Draw(o.draw)
 }
 
-func (o *overlay) copy() {
+// confirm hands the chosen pixels to the toolbox, which edits and annotates
+// them where a text field and a toolbar are at home.
+func (o *overlay) confirm() {
 	if o.hasSelection() {
-		o.s.copy(o)
-	}
-}
-
-func (o *overlay) save() {
-	if o.hasSelection() {
-		o.s.save(o)
+		o.s.editOverlay(o)
 	}
 }
 
@@ -91,14 +82,10 @@ func (o *overlay) hasSelection() bool {
 	return o.sel.W > 0 && o.sel.H > 0
 }
 
-func (o *overlay) buttons() []shotButton { return buttonsAt(o.size.W, o.size.H) }
-
-// input takes the pointer: a drag selects, a click on the toolbar acts, and
-// a right click leaves.
+// input takes the pointer: a drag selects, a right click leaves.
 func (o *overlay) input(ev ui.InputEvent) bool {
 	switch ev.Kind {
 	case ui.InputPointerDown:
-		log.Printf("shots: down x=%v y=%v button=%v clicks=%v buttons=%+v", ev.X, ev.Y, ev.Button, ev.Clicks, o.buttons())
 		switch ev.Button {
 		case 1:
 			o.s.cancel()
@@ -106,21 +93,6 @@ func (o *overlay) input(ev ui.InputEvent) bool {
 		case 0:
 		default:
 			return false
-		}
-		if o.hasSelection() {
-			for _, b := range o.buttons() {
-				if b.rect.Contains(ev.X, ev.Y) {
-					switch b.action {
-					case actCopy:
-						o.s.copy(o)
-					case actSave:
-						o.s.save(o)
-					case actCancel:
-						o.s.cancel()
-					}
-					return true
-				}
-			}
 		}
 		o.dragging = true
 		o.anchorX, o.anchorY = ev.X, ev.Y
@@ -131,11 +103,9 @@ func (o *overlay) input(ev ui.InputEvent) bool {
 		o.px, o.py, o.pointer = ev.X, ev.Y, true
 		if o.dragging {
 			o.sel = clampSelection(rectFromDrag(o.anchorX, o.anchorY, ev.X, ev.Y), o.size.W, o.size.H)
-			log.Printf("shots: drag x=%v y=%v sel=%+v", ev.X, ev.Y, o.sel)
 		}
 		return true
 	case ui.InputPointerUp:
-		log.Printf("shots: up x=%v y=%v button=%v dragging=%v", ev.X, ev.Y, ev.Button, o.dragging)
 		if ev.Button != 0 || !o.dragging {
 			return false
 		}
@@ -149,24 +119,18 @@ func (o *overlay) input(ev ui.InputEvent) bool {
 	return false
 }
 
-// draw paints the frozen display, darkens what is not selected, and puts
-// the toolbar over it.
+// draw paints the frozen display, darkens what is not selected, and says
+// what Enter does.
 func (o *overlay) draw(p *ui.Painter, r ui.Rect) {
 	o.size = ui.Rect{W: r.W, H: r.H}
 	p.ImageRegion(o.bmp, ui.Rect{}, r, ui.ImageOptions{})
 
-	if !o.hasSelection() {
-		o.drawHint(p, r)
-		if o.dragging {
-			o.drawPointer(p, r)
-		}
-		return
+	if o.hasSelection() {
+		o.dim(p, r)
+		o.drawSelection(p, r)
+		o.drawSize(p, r)
 	}
-
-	o.dim(p, r)
-	o.drawSelection(p, r)
-	o.drawSize(p, r)
-	o.drawButtons(p, r)
+	o.drawHint(p, r)
 	if o.dragging {
 		o.drawPointer(p, r)
 	}
@@ -209,7 +173,10 @@ func (o *overlay) drawSize(p *ui.Painter, r ui.Rect) {
 }
 
 func (o *overlay) drawHint(p *ui.Painter, r ui.Rect) {
-	text := "拖动鼠标框选 · Enter 复制 · " + saveKeyText() + " 保存 · Esc 取消"
+	text := "拖动鼠标框选 · Esc 取消"
+	if o.hasSelection() {
+		text = "Enter 进入编辑与标注 · Esc 取消"
+	}
 	tw, th := p.MeasureText(0, ui.Span{Text: text, Size: 13})
 	const padX, padY = 14, 8
 	w, h := tw+2*padX, th+2*padY
@@ -223,36 +190,8 @@ func (o *overlay) drawHint(p *ui.Painter, r ui.Rect) {
 	p.Text(box.X+padX, box.Y+padY, text, 13, ui.RGB(255, 255, 255))
 }
 
-func (o *overlay) drawButtons(p *ui.Painter, r ui.Rect) {
-	for _, b := range o.buttons() {
-		box := ui.Rect{X: r.X + b.rect.X, Y: r.Y + b.rect.Y, W: b.rect.W, H: b.rect.H}
-		hover := o.pointer && b.rect.Contains(o.px, o.py)
-		bg := ui.RGBA(28, 28, 28, 0.86)
-		if b.action == actCopy {
-			bg = accent
-		}
-		if hover {
-			if b.action == actCopy {
-				bg = ui.RGB(10, 132, 255)
-			} else {
-				bg = ui.RGBA(76, 76, 76, 0.94)
-			}
-		}
-		p.Fill(box, bg, 6)
-		tw, th := p.MeasureText(0, ui.Span{Text: b.label, Size: 13})
-		p.Text(box.X+(box.W-tw)/2, box.Y+(box.H-th)/2, b.label, 13, ui.RGB(255, 255, 255))
-	}
-}
-
 func (o *overlay) drawPointer(p *ui.Painter, r ui.Rect) {
 	line := ui.RGBA(255, 255, 255, 0.32)
 	p.Fill(ui.Rect{X: r.X + o.px, Y: r.Y, W: 1, H: r.H}, line, 0)
 	p.Fill(ui.Rect{X: r.X, Y: r.Y + o.py, W: r.W, H: 1}, line, 0)
-}
-
-func saveKeyText() string {
-	if runtime.GOOS == "darwin" {
-		return "⌘S"
-	}
-	return "Ctrl+S"
 }

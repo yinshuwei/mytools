@@ -1,6 +1,7 @@
 package app
 
 import (
+	"image"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -148,6 +149,21 @@ func TestAppearance(t *testing.T) {
 	}
 	if next.themeMode != "light" {
 		t.Errorf("点了浅色后 themeMode = %q", next.themeMode)
+	}
+}
+
+// TestEditShot checks that the picture the overlay hands back shows in the
+// screenshot page, ready to be annotated.
+func TestEditShot(t *testing.T) {
+	a := New()
+	a.editShot(image.NewRGBA(image.Rect(0, 0, 320, 200)), 2)
+	if a.selected != "shot" {
+		t.Fatalf("选中 = %q，want shot", a.selected)
+	}
+	tr := ui.NewTester(a.View, 1000, 720)
+	tr.Frame()
+	if !tr.HasText("320 × 200 像素") || !tr.HasText("复制") || !tr.HasText("马赛克") {
+		t.Errorf("截图页没有出现：%q", tr.Texts())
 	}
 }
 
