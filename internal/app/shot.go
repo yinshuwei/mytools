@@ -1,17 +1,13 @@
 package app
 
 import (
-	"bytes"
 	"image"
-	"image/color"
-	"image/draw"
-	"image/png"
 	"log"
-	"math"
 	"runtime"
 
 	"github.com/egoist/mygo"
 
+	mytools "github.com/yinshuwei/mytools"
 	"github.com/yinshuwei/mytools/internal/shots"
 )
 
@@ -64,8 +60,8 @@ func (a *App) setupTray() {
 		{Label: "退出", Click: func(*mygo.MenuItem, *mygo.Window) { a.quit() }},
 	})
 	opts := mygo.TrayOptions{
-		Icon:           trayIcon(),
-		IconIsTemplate: runtime.GOOS == "darwin",
+		Icon:           mytools.Icon,
+		IconIsTemplate: false,
 		ToolTip:        "开发者工具箱",
 	}
 	// The icon is the window's way back: a click on it opens the window, and
@@ -110,39 +106,4 @@ func defaultShotKey() string {
 		return "Super+Shift+A"
 	}
 	return "Ctrl+Alt+A"
-}
-
-// trayIcon draws a small camera: the tray has no image file to load, and a
-// drawn glyph stays sharp at any scale. macOS tints a template icon itself,
-// so there it is black and transparent.
-func trayIcon() []byte {
-	const size = 32
-	img := image.NewNRGBA(image.Rect(0, 0, size, size))
-	ink := color.NRGBA{R: 79, G: 124, B: 255, A: 255}
-	if runtime.GOOS == "darwin" {
-		ink = color.NRGBA{A: 255}
-	}
-	fill := func(r image.Rectangle) {
-		draw.Draw(img, r, image.NewUniform(ink), image.Point{}, draw.Src)
-	}
-	// Camera body, and the bump that holds the viewfinder.
-	fill(image.Rect(5, 10, 27, 12))
-	fill(image.Rect(5, 23, 27, 25))
-	fill(image.Rect(5, 12, 7, 23))
-	fill(image.Rect(25, 12, 27, 23))
-	fill(image.Rect(12, 6, 20, 10))
-	// The lens, a ring two pixels thick.
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			d := math.Hypot(float64(x)+0.5-16, float64(y)+0.5-18)
-			if d >= 4.5 && d <= 6.5 {
-				img.Set(x, y, ink)
-			}
-		}
-	}
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return nil
-	}
-	return buf.Bytes()
 }

@@ -19,3 +19,10 @@ var Readme string
 //
 //go:embed docs/*.png
 var Shots embed.FS
+
+// Icon is the application's icon, the same file the installers use. The
+// tray shows it too, so that the icon in the menu bar or notification area
+// is the one people know the program by.
+//
+//go:embed resources/icon.png
+var Icon []byte
