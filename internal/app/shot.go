@@ -52,13 +52,19 @@ func (a *App) SetupDesktop() {
 	a.setupTray()
 }
 
-func (a *App) setupTray() {
-	menu := mygo.NewMenu([]*mygo.MenuItem{
+// trayMenu is the icon's menu: the window comes back, a screenshot starts,
+// and hiding puts the window away — closing the program is not on it.
+func (a *App) trayMenu() *mygo.Menu {
+	return mygo.NewMenu([]*mygo.MenuItem{
 		{Label: "显示主窗口", Click: func(*mygo.MenuItem, *mygo.Window) { a.showWindow() }},
 		{Label: "截图", Click: func(*mygo.MenuItem, *mygo.Window) { a.TakeShot() }},
 		mygo.Separator(),
-		{Label: "退出", Click: func(*mygo.MenuItem, *mygo.Window) { a.quit() }},
+		{Label: "隐藏主窗口", Click: func(*mygo.MenuItem, *mygo.Window) { a.HideWindow() }},
 	})
+}
+
+func (a *App) setupTray() {
+	menu := a.trayMenu()
 	opts := mygo.TrayOptions{
 		Icon:           mytools.Icon,
 		IconIsTemplate: false,
@@ -77,7 +83,7 @@ func (a *App) setupTray() {
 		log.Printf("托盘图标不可用：%v", err)
 		return
 	}
-	a.tray, a.trayMenu = tray, menu
+	a.tray, a.macMenu = tray, menu
 	if trayClickOpensWindow(runtime.GOOS) {
 		tray.OnClick(a.showWindow)
 	}

@@ -33,23 +33,37 @@ func main() {
 	mygo.App.SetName("MyTools")
 	mygo.App.SetVersion(version)
 	mygo.App.WhenReady(func() {
+		a := app.New()
 		// No menu: on Linux and Windows the bar would take a line off the
 		// top of the window, and this window is only its pages. On a Mac
-		// the same items live in the system's menu bar, where Quit and
-		// the rest belong and where they cost the window no room. The
-		// keys in the pages work either way, cutting and pasting among
-		// them.
+		// the same items live in the system's menu bar, where they cost
+		// the window no room. The keys in the pages work either way,
+		// cutting and pasting among them.
+		//
+		// The application menu is spelt out rather than RoleAppMenu: that
+		// one carries Quit, and closing the program is not one of the
+		// window's ways out. Cmd+Q puts the window away like the rest.
 		var menu *mygo.Menu
 		if runtime.GOOS == "darwin" {
 			menu = mygo.NewMenu([]*mygo.MenuItem{
-				{Role: mygo.RoleAppMenu},
+				{Label: "MyTools", Submenu: []*mygo.MenuItem{
+					{Role: mygo.RoleAbout},
+					mygo.Separator(),
+					{Role: mygo.RoleServices},
+					mygo.Separator(),
+					{Role: mygo.RoleHide},
+					{Role: mygo.RoleHideOthers},
+					{Role: mygo.RoleUnhide},
+					mygo.Separator(),
+					{Label: "隐藏主窗口", Accelerator: "Cmd+Q",
+						Click: func(*mygo.MenuItem, *mygo.Window) { a.HideWindow() }},
+				}},
 				{Role: mygo.RoleEditMenu},
 				{Role: mygo.RoleViewMenu},
 				{Role: mygo.RoleWindowMenu},
 			})
 		}
 		mygo.App.SetMenu(menu) // without this call, mygo installs its own
-		a := app.New()
 		win := mygo.NewWindow(mygo.WindowOptions{
 			Title:    "开发者工具箱",
 			Width:    980,

@@ -700,8 +700,14 @@ func (s *Screenshot) removeShape(i int) {
 }
 
 func (s *Screenshot) status(c *ui.Context) {
+	// Escape clears the picture earlier in the same frame, before this row
+	// is built: there is no size to say until the landing page comes back.
+	if s.img == nil {
+		return
+	}
+	b := s.img.Bounds()
 	ui.Row(c).Gap(12).Wrap().AlignItems(ui.Center).Children(func() {
-		widgets.Hint(c, fmt.Sprintf("%d × %d 像素", s.img.Bounds().Dx(), s.img.Bounds().Dy()))
+		widgets.Hint(c, fmt.Sprintf("%d × %d 像素", b.Dx(), b.Dy()))
 		widgets.Hint(c, "拖动绘制 · 选中后拖动可移动、拖小圆点缩放（箭头的端点调方向）· "+
 			"方向键微调，按住 Shift 一次 10 像素 · Delete 删除")
 	})

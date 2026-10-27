@@ -140,6 +140,24 @@ func TestShotMoveShape(t *testing.T) {
 	}
 }
 
+// TestShotEscapeClears checks Escape on the editor: the picture goes and the
+// page is the landing one again, without a frame sizing a picture that the
+// key already cleared.
+func TestShotEscapeClears(t *testing.T) {
+	s := &Screenshot{}
+	s.SetImage(image.NewRGBA(image.Rect(0, 0, 200, 150)), 1)
+	tr := ui.NewTester(s.View, 900, 600)
+	tr.Frame()
+	tr.Key(0, ui.KeyEscape)
+	tr.Frame()
+	if s.img != nil {
+		t.Error("Esc 之后图片还在")
+	}
+	if !tr.HasText("开始截图") {
+		t.Errorf("Esc 之后没有回到开始截图那页：%q", tr.Texts())
+	}
+}
+
 // TestShotTextFloats checks that the text field floats over the picture: the
 // canvas keeps its box as the field comes, and Enter puts the text down.
 func TestShotTextFloats(t *testing.T) {

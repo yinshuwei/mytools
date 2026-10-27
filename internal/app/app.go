@@ -31,12 +31,7 @@ type App struct {
 	shotTool *tools.Screenshot
 	shots    *shots.Service
 	tray     *mygo.Tray
-	trayMenu *mygo.Menu // the menu a right click pops on a Mac
-
-	// quitting lets the window close when the program is on its way out;
-	// otherwise a close only puts it away.
-	quitting bool
-	quitApp  func() // mygo.App.Quit, which a test may watch instead
+	macMenu  *mygo.Menu // the menu a right click pops on a Mac
 
 	// The global shortcuts, as mygo names them: the screenshot's, and the
 	// one that calls the window back. keyErr says why one did not take.

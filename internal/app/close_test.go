@@ -2,21 +2,6 @@ package app
 
 import "testing"
 
-// TestCloseWithoutTrayQuits checks that a machine with no tray to come back
-// from leaves the program, rather than hiding a window nothing can raise.
-func TestCloseWithoutTrayQuits(t *testing.T) {
-	a := New()
-	left := false
-	a.quitApp = func() { left = true }
-	a.hideToTray()
-	if !left {
-		t.Error("没有托盘时关掉窗口没有退出")
-	}
-	if !a.quitting {
-		t.Error("退出时没有放行窗口关闭")
-	}
-}
-
 // TestWindowToggle checks what the shortcut does to the window: one on screen
 // goes away, one that is hidden or minimized comes back.
 func TestWindowToggle(t *testing.T) {
@@ -32,6 +17,24 @@ func TestWindowToggle(t *testing.T) {
 		if got := windowActionFor(c.visible, c.minimized); got != c.want {
 			t.Errorf("显示=%v 最小化=%v 时 = %v，want %v", c.visible, c.minimized, got, c.want)
 		}
+	}
+}
+
+// TestTrayMenuHides checks the icon's menu: the window goes away from it, and
+// closing the program is not one of the things it offers.
+func TestTrayMenuHides(t *testing.T) {
+	a := New()
+	hides := false
+	for _, it := range a.trayMenu().Items() {
+		if it.Label == "退出" {
+			t.Error("托盘菜单里还有退出")
+		}
+		if it.Label == "隐藏主窗口" {
+			hides = true
+		}
+	}
+	if !hides {
+		t.Error("托盘菜单里没有隐藏主窗口")
 	}
 }
 
