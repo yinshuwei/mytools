@@ -30,7 +30,8 @@ param(
     # Build for this machine only.
     [switch] $Local,
     # Keep development features and symbols, instead of a release build.
-    [switch] $Debug,
+    # (Not "Debug": CmdletBinding already defines a common -Debug parameter.)
+    [switch] $Dev,
     # Do not pack the tar.gz archives.
     [switch] $NoArchive
 )
@@ -94,7 +95,7 @@ try {
 
         $ldflags = "-X main.version=$Version"
         $tagArgs = @()
-        if (-not $Debug) {
+        if (-not $Dev) {
             $ldflags = "-s -w $ldflags"
             $tagArgs = @("-tags", "mygo_noinspector")
         }
