@@ -38,6 +38,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# A target's GOOS must not outlive the build, and removing a variable that is
+# not set is an error: this clears the ones that are there.
+function Clear-GoEnv {
+    foreach ($v in "GOOS", "GOARCH", "CGO_ENABLED") {
+        if (Test-Path "Env:$v") { Remove-Item "Env:$v" }
+    }
+}
+
 $root = Split-Path -Parent $PSScriptRoot
 $name = "mytools"
 $pkg = "./cmd/mytools"
@@ -77,7 +85,21 @@ if (-not [System.IO.Path]::IsPathRooted($Out)) {
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 
 Push-Location $root
+$syso = @()
 try {
+    # Explorer, the taskbar and the window take their icon from the icon
+    # resource of the executable, which go build links only from a .syso in
+    # the main package: mygo build writes one, scripts/winres does it here.
+    # The files it writes go away in the finally, and only the Windows
+    # builds read them.
+    if (@($targets | Where-Object { $_.Trim() -like "windows/*" }).Count -gt 0) {
+        # go run builds for this machine, so no target's GOOS may be in the
+        # environment.
+        Clear-GoEnv
+        $syso = @(& go run ./scripts/winres -icon resources/icon.png -o cmd/mytools)
+        if ($LASTEXITCODE -ne 0) { throw "scripts/winres failed" }
+    }
+
     foreach ($target in $targets) {
         $target = $target.Trim()
         $parts = $target.Split("/")
@@ -136,7 +158,8 @@ try {
     }
 }
 finally {
-    Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED -ErrorAction SilentlyContinue
+    Clear-GoEnv
+    if ($syso) { Remove-Item $syso -Force -ErrorAction SilentlyContinue }
     Pop-Location
 }
 

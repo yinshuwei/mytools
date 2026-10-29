@@ -1,4 +1,6 @@
 /mytools
 /dist
 scripts/dist/
+# Left behind by an interrupted build (see scripts/winres).
+cmd/mytools/winres_windows_*.syso
 .DS_Store

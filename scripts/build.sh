@@ -115,6 +115,19 @@ out=$(CDPATH= cd -- "$out" && pwd)
 
 cd "$root"
 
+# Explorer, the taskbar and the window take their icon from the icon resource
+# of the executable, which go build links only from a .syso in the main
+# package: mygo build writes one, scripts/winres does it here. Only the
+# Windows targets read the files, and they go away with the script.
+syso=
+cleanup() { [ -z "$syso" ] || rm -f $syso; }
+trap cleanup EXIT
+case " $platforms " in
+*windows/*)
+	syso=$(go run ./scripts/winres -icon resources/icon.png -o cmd/mytools)
+	;;
+esac
+
 for target in $platforms; do
 	case $target in
 	*/*) ;;

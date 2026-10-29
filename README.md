@@ -40,6 +40,8 @@ scripts/build.sh -v 1.2.3        # 指定版本号（默认取 git 标签）
 
 每个目标各占一个 `dist/<os>-<arch>/`：可执行文件，以及运行时放在它旁边的 `resources/`；再打成 `dist/mytools-<版本>-<os>-<arch>.tar.gz`。macOS 是个例外：那里双击裸的可执行文件只会让 Finder 开一个 Terminal 去跑它，所以这个目标是完整的 `mytools.app` 包（`Contents/MacOS/mytools` + `Contents/Resources` + `Info.plist`，在有 macOS 工具链的机器上还带图标与 ad hoc 签名），双击直接开窗口。默认是发布构建——`-trimpath`、`-ldflags "-s -w"`、`-tags mygo_noinspector`（去掉 MyGo 的界面检查器），Windows 目标另加 `-H=windowsgui`，免得弹出控制台；加 `-Dev` 就反过来，留着调试功能与符号（不能叫 `-Debug`，那是 PowerShell 公共参数）。
 
+Windows 的可执行文件里还带着 `resources/icon.png` 编出来的图标资源：`scripts/winres` 按 Windows 要的七种尺寸把它写成一个 `.syso` 放进 `cmd/mytools`，`go build` 链接时一起收进 exe，构建完再删掉（`go tool mygo build` 自己会做这件事，还多带清单和版本信息）。所以资源管理器、任务栏、标题栏、托盘显示的都是这个图标，不是系统默认的程序图标；程序不需要把 `icon.png` 留在安装目录里也能显示。
+
 Windows 上是同一套参数，用 `scripts\build.cmd`（或直接 `scripts/build.ps1`），开关名对应为 `-Platform`、`-Version`、`-Local`、`-Dev`、`-NoArchive`。
 
 要从系统里装——macOS 的 `.app` 与 `.dmg`、Windows 的安装包、Linux 的 `.deb` 与 `install.sh`——用 MyGo 自带的 CLI 打包：
