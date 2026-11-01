@@ -32,6 +32,9 @@ type App struct {
 	shots    *shots.Service
 	tray     *mygo.Tray
 	macMenu  *mygo.Menu // the menu a right click pops on a Mac
+	// quitting is set by the tray menu's Quit: every other way of closing
+	// the window puts it away, so the close has to be let through.
+	quitting bool
 
 	// The global shortcuts, as mygo names them: the screenshot's, and the
 	// one that calls the window back. keyErr says why one did not take.

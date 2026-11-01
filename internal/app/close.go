@@ -8,21 +8,35 @@ import (
 )
 
 // watchClose keeps the window from taking the program down with it: the
-// window is not the program, and the icon is the way back to it. Every way of
-// closing the program — the window's close, the tray menu, Cmd+Q, the dock —
-// puts the window away instead.
+// window is not the program, and the icon is the way back to it. Closing the
+// window — the window's button, Cmd+Q, the dock — puts it away instead, and
+// the tray menu's Quit is the one that leaves for good.
 func (a *App) watchClose() {
 	if a.win == nil {
 		return
 	}
 	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
+		if a.quitting {
+			return
+		}
 		e.PreventDefault()
 		a.HideWindow()
 	})
 	a.win.OnClose(func(e *mygo.CloseEvent) {
+		if a.quitting {
+			return
+		}
 		e.PreventDefault()
 		a.HideWindow()
 	})
+}
+
+// Quit leaves the program, for the tray menu: every other way of closing the
+// window keeps it in the tray, so this one has to say so before quitting,
+// and to let the close through that the watch above would otherwise stop.
+func (a *App) Quit() {
+	a.quitting = true
+	mygo.App.Quit()
 }
 
 // toggleWindow is what the shortcut does: it puts the window away when it is

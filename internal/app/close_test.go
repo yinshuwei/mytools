@@ -20,21 +20,24 @@ func TestWindowToggle(t *testing.T) {
 	}
 }
 
-// TestTrayMenuHides checks the icon's menu: the window goes away from it, and
-// closing the program is not one of the things it offers.
-func TestTrayMenuHides(t *testing.T) {
+// TestTrayMenu checks the icon's menu: the window goes away from it, and it
+// holds the one way out of the program that closing the window does not.
+func TestTrayMenu(t *testing.T) {
 	a := New()
-	hides := false
+	hides, quits := false, false
 	for _, it := range a.trayMenu().Items() {
-		if it.Label == "退出" {
-			t.Error("托盘菜单里还有退出")
-		}
-		if it.Label == "隐藏主窗口" {
+		switch it.Label {
+		case "隐藏主窗口":
 			hides = true
+		case "退出":
+			quits = it.Click != nil
 		}
 	}
 	if !hides {
 		t.Error("托盘菜单里没有隐藏主窗口")
+	}
+	if !quits {
+		t.Error("托盘菜单里没有退出")
 	}
 }
 
