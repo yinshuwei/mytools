@@ -213,6 +213,8 @@ func (a *App) View(c *ui.Context) {
 			a.page(c, t)
 		})
 	})
+	// Last, over everything: the toasts of the frame.
+	a.toasts(c, t)
 }
 
 // page fills the room under the heading: the settings, or the tool the

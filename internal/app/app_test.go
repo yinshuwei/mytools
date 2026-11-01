@@ -167,6 +167,27 @@ func TestEditShot(t *testing.T) {
 	}
 }
 
+// TestToastAtTop checks that a toast shows at the top of the window: the
+// bottom half of a page holds its controls, and a toast over them covers the
+// button that just said it.
+func TestToastAtTop(t *testing.T) {
+	a := New()
+	a.selected, a.picked = "codec", "codec"
+	tr := ui.NewTester(a.View, 1000, 720)
+	tr.Frame()
+	if err := tr.Click("复制输入"); err != nil {
+		t.Fatalf("找不到复制按钮：%v", err)
+	}
+	tr.Frame()
+	r, ok := tr.Find("已复制到剪贴板")
+	if !ok {
+		t.Fatalf("没有出现提示：%q", tr.Texts())
+	}
+	if r.Y+r.H > 720/2 {
+		t.Errorf("提示落在 y=%v，不在窗口上半部分", r.Y)
+	}
+}
+
 // TestSidebarChooses checks that clicking an item shows its page.
 func TestSidebarChooses(t *testing.T) {
 	a := New()
