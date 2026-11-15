@@ -22,14 +22,15 @@ type Codec struct {
 
 func (*Codec) ID() string   { return "codec" }
 func (*Codec) Name() string { return "信息编解码" }
-func (*Codec) Desc() string { return "Base64、URL、Hex 的编码与解码" }
+func (*Codec) Desc() string { return "URL、Base64、Hex 的编码与解码" }
 
 // MaxWidth keeps the boxes of text and the buttons between them in a
 // column, rather than stretching them across a wide window.
 func (*Codec) MaxWidth() float32 { return PageWidth }
 
-// modes are the codecs the select offers.
-var modes = []string{"Base64", "Base64 (URL)", "URL", "Hex"}
+// modes are the codecs the select offers, most used first: URL, for the query
+// string of a link, before the Base64 of a payload.
+var modes = []string{"URL", "Base64", "Base64 (URL)", "Hex"}
 
 // encodeText turns s into the chosen representation.
 func encodeText(mode, s string) (string, error) {

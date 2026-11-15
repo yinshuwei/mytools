@@ -529,6 +529,11 @@ func TestCodec(t *testing.T) {
 	if _, err := decodeText("Hex", "zz"); err == nil {
 		t.Error("Hex 解码无效输入应当报错")
 	}
+	// The one used most comes first: the page starts on it, and the select
+	// lists it at the top.
+	if modes[0] != "URL" {
+		t.Errorf("默认编码方式 = %q，want URL", modes[0])
+	}
 }
 
 // TestCodecShortcuts checks that the keyboard presses the page's buttons
